@@ -16,96 +16,97 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link } from '@tanstack/react-router'
-import { ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Button } from '@/components/ui/button'
-import { HeroTerminalDemo } from '../hero-terminal-demo'
+
+const YUNXI_AI_TITLE = 'Yunxi AI'
 
 interface HeroProps {
   className?: string
-  isAuthenticated?: boolean
 }
 
-export function Hero(props: HeroProps) {
+export function Hero(_props: HeroProps) {
   const { t } = useTranslation()
+  const title = t(YUNXI_AI_TITLE)
+  const titleBase = title.replace(' AI', '')
+  const titleSuffix = 'AI Relay'
 
   return (
-    <section className='relative z-10 flex flex-col items-center overflow-hidden px-6 pt-28 pb-16 md:pt-36 md:pb-24'>
-      {/* Radial gradient background */}
-      <div
-        aria-hidden
-        className='pointer-events-none absolute inset-0 -z-10 opacity-25 dark:opacity-[0.12]'
-        style={{
-          background: [
-            'radial-gradient(ellipse 60% 50% at 20% 20%, oklch(0.72 0.18 250 / 80%) 0%, transparent 70%)',
-            'radial-gradient(ellipse 50% 40% at 80% 15%, oklch(0.65 0.15 200 / 60%) 0%, transparent 70%)',
-            'radial-gradient(ellipse 40% 35% at 40% 80%, oklch(0.70 0.12 280 / 40%) 0%, transparent 70%)',
-          ].join(', '),
-        }}
+    <main className='relative flex min-h-[calc(100svh-64px)] items-center justify-center overflow-hidden bg-[#070a13] px-6 pt-24 pb-16 text-white'>
+      <iframe
+        aria-hidden='true'
+        className='pointer-events-none absolute inset-0 z-0 size-full border-0'
+        src='/yunxi-background.html?embed=1'
+        title=''
+        tabIndex={-1}
       />
-      {/* Grid pattern */}
-      <div
-        aria-hidden
-        className='absolute inset-0 -z-10 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_30%,black_20%,transparent_100%)] bg-[size:4rem_4rem] opacity-[0.08]'
-      />
+      <div aria-hidden className='absolute inset-0 z-0 bg-black/15' />
 
-      <div className='flex max-w-3xl flex-col items-center text-center'>
-        <h1
-          className='landing-animate-fade-up text-[clamp(2rem,5.5vw,3.5rem)] leading-[1.15] font-bold tracking-tight'
+      <section className='relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center text-center'>
+        <div
+          className='landing-animate-fade-up text-[13px] leading-7 tracking-[0.18em] text-white/48 md:text-sm'
           style={{ animationDelay: '0ms' }}
         >
-          {t('Unified API Gateway for')}
-          <br />
-          <span className='bg-gradient-to-r from-blue-400 via-violet-400 to-purple-500 bg-clip-text text-transparent'>
-            {t('All Your AI Models')}
-          </span>
-        </h1>
-        <p
-          className='landing-animate-fade-up text-muted-foreground/80 mt-5 max-w-lg text-base leading-relaxed opacity-0 md:text-lg'
-          style={{ animationDelay: '80ms' }}
-        >
-          {t('Power AI applications, manage digital assets, connect the Future')}
-        </p>
-        <div
-          className='landing-animate-fade-up mt-8 flex items-center gap-3 opacity-0'
-          style={{ animationDelay: '160ms' }}
-        >
-          {props.isAuthenticated ? (
-            <Button
-              className='group rounded-lg'
-              render={<Link to='/dashboard' />}
-            >
-              {t('Go to Dashboard')}
-              <ArrowRight className='ml-1 size-3.5 transition-transform duration-200 group-hover:translate-x-0.5' />
-            </Button>
-          ) : (
-            <>
-              <Button
-                className='group rounded-lg'
-                render={<Link to='/sign-up' />}
-              >
-                {t('Get Started')}
-                <ArrowRight className='ml-1 size-3.5 transition-transform duration-200 group-hover:translate-x-0.5' />
-              </Button>
-              <Button
-                variant='outline'
-                className='border-border/50 hover:border-border hover:bg-muted/50 rounded-lg'
-                render={<Link to='/pricing' />}
-              >
-                {t('View Pricing')}
-              </Button>
-            </>
-          )}
+          <p>{t('Clouds pass without a sound,')}</p>
+          <p>{t('and the stream carries light forward.')}</p>
         </div>
-      </div>
 
-      <div
-        className='landing-animate-fade-up w-full opacity-0'
-        style={{ animationDelay: '300ms' }}
-      >
-        <HeroTerminalDemo />
-      </div>
-    </section>
+        <div
+          className='landing-animate-fade-up mt-14 flex flex-col items-center opacity-0'
+          style={{ animationDelay: '100ms' }}
+        >
+          <h1 className='text-[clamp(4.2rem,14vw,8.1rem)] leading-none text-white drop-shadow-[0_24px_80px_rgba(0,0,0,0.52)]'>
+            <span
+              className='relative inline-block animate-[title-float_7.2s_ease-in-out_infinite] font-medium tracking-[0.08em] text-white/98 after:absolute after:inset-x-[-0.05em] after:top-1/2 after:h-[0.52em] after:-translate-y-1/2 after:animate-[title-sheen_5.8s_ease-in-out_infinite] after:bg-[linear-gradient(90deg,transparent_0%,rgba(214,224,255,0.04)_18%,rgba(255,255,255,0.22)_50%,rgba(214,224,255,0.05)_82%,transparent_100%)] after:blur-[10px] after:content-[\"\"]'
+              style={{
+                fontFamily:
+                  '"Noto Serif SC", "Songti SC", "STSong", "Source Han Serif SC", serif',
+              }}
+            >
+              <span className='bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(245,247,255,0.96)_48%,rgba(214,223,255,0.86)_100%)] bg-clip-text text-transparent'>
+                {titleBase}
+              </span>
+            </span>
+          </h1>
+
+          <p className='mt-5 animate-[title-float_7.2s_ease-in-out_infinite] text-[12px] font-light tracking-[0.42em] text-white/44 uppercase'>
+            {titleSuffix}
+          </p>
+        </div>
+
+        <div
+          className='landing-animate-fade-up mt-24 flex flex-col items-center gap-3 text-[11px] text-white/42 opacity-0'
+          style={{ animationDelay: '180ms' }}
+        >
+          <span className='tracking-[0.16em]'>{t('API base')}</span>
+          <div className='rounded-full border border-white/10 bg-white/6 px-4 py-2 backdrop-blur'>
+            <code className='font-mono text-[11px] text-white/88'>
+              https://ai.laiber.cloud/v1
+            </code>
+          </div>
+        </div>
+      </section>
+
+      <style>{`
+        @keyframes title-float {
+          0%, 100% {
+            transform: translate3d(0, 0, 0);
+          }
+          50% {
+            transform: translate3d(0, -6px, 0);
+          }
+        }
+
+        @keyframes title-sheen {
+          0%, 100% {
+            opacity: 0.28;
+            transform: translateX(-10%) translateY(-50%);
+          }
+          50% {
+            opacity: 0.9;
+            transform: translateX(10%) translateY(-50%);
+          }
+        }
+      `}</style>
+    </main>
   )
 }

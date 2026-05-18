@@ -1,0 +1,34 @@
+# 连接远程（服务器）Redis 和 PostgreSQL 的本地开发配置
+# 使用前需先建立 SSH 隧道：
+#   ssh -N -L 5433:127.0.0.1:5432 -L 6381:127.0.0.1:6379 qianshan-oci &
+#
+# 启动：
+#   podman compose -f docker-compose.remote-db.yml up -d
+#
+# 停止：
+#   podman compose -f docker-compose.remote-db.yml down
+
+services:
+  new-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: new-api-dev:local
+    container_name: new-api-dev
+    restart: unless-stopped
+    env_file:
+      - .env.remote-db
+    ports:
+      - "3000:3000"
+    volumes:
+      - dev_data:/data
+    environment:
+      # host.containers.internal 是 Podman 容器内访问宿主机的特殊地址
+      # 5433/6381 是通过 SSH 隧道转发的服务器端口
+      - SQL_DSN=${SQL_DSN}
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING}
+      - TZ=${TZ:-Asia/Shanghai}
+      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
+
+volumes:
+  dev_data:

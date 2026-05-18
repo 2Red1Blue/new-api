@@ -13,6 +13,9 @@ web/classic/dist
 web/node_modules
 web/dist
 .env
+.env.local-db
+.env.remote-db
+.env.server-yunxi
 one-api
 new-api
 /__debug_bin*

@@ -35,6 +35,9 @@ interface FooterColumnProps {
 interface FooterProps {
   logo?: string
   name?: string
+  brandName?: string
+  brandTagline?: string
+  supportingNote?: string
   columns?: FooterColumnProps[]
   copyright?: string
   className?: string
@@ -106,6 +109,10 @@ export function Footer(props: FooterProps) {
 
   const displayLogo = systemLogo || props.logo || '/logo.png'
   const displayName = systemName || props.name || 'New API'
+  const displayBrandName = props.brandName || displayName
+  const displayBrandTagline =
+    props.brandTagline || t('Powerful API Management Platform')
+  const supportingNote = props.supportingNote
   const isDemoSiteMode = Boolean(demoSiteEnabled)
   const currentYear = new Date().getFullYear()
 
@@ -206,12 +213,17 @@ export function Footer(props: FooterProps) {
                 className='size-7 rounded-lg object-contain'
               />
               <span className='text-sm font-semibold tracking-tight'>
-                {displayName}
+                {displayBrandName}
               </span>
             </Link>
             <p className='text-muted-foreground/60 mt-3 max-w-[200px] text-xs leading-relaxed'>
-              {t('Powerful API Management Platform')}
+              {displayBrandTagline}
             </p>
+            {supportingNote ? (
+              <p className='text-muted-foreground/35 mt-3 text-[10px] tracking-[0.12em]'>
+                {supportingNote}
+              </p>
+            ) : null}
           </div>
 
           {/* Links columns */}

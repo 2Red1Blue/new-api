@@ -1,0 +1,6 @@
+services:
+  new-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.yunxi
+    image: laiber/new-api:yunxi

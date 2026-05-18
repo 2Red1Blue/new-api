@@ -1,0 +1,28 @@
+# 本地开发：对齐实例架构（PostgreSQL/Redis 由 1Panel 独立提供）
+#
+# 启动：
+#   podman compose -f docker-compose.local-db.yml up -d
+#
+# 停止：
+#   podman compose -f docker-compose.local-db.yml down
+
+services:
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: new-api-dev
+    restart: unless-stopped
+    env_file:
+      - .env.local-db
+    ports:
+      - "3000:3000"
+    volumes:
+      - dev_data:/data
+    environment:
+      # 通过宿主机端口访问本地 1Panel 风格基础设施（127.0.0.1:5432/6379）
+      - SQL_DSN=${SQL_DSN}
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING}
+      - TZ=${TZ:-Asia/Shanghai}
+      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
+
+volumes:
+  dev_data:
