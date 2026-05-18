@@ -13,9 +13,3 @@ services:
     volumes:
       - ./data:/data
       - ./logs:/app/logs
-    environment:
-      - SQL_DSN=${SQL_DSN}
-      - REDIS_CONN_STRING=${REDIS_CONN_STRING}
-      - TZ=${TZ:-Asia/Shanghai}
-      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
-      - NODE_NAME=${NODE_NAME:-ai-laiber-cloud}

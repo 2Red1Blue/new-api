@@ -11,18 +11,13 @@ services:
     image: calciumion/new-api:latest
     container_name: new-api-dev
     restart: unless-stopped
+    # 通过宿主机端口访问本地 1Panel 风格基础设施（127.0.0.1:5432/6379）
     env_file:
       - .env.local-db
     ports:
       - "3000:3000"
     volumes:
       - dev_data:/data
-    environment:
-      # 通过宿主机端口访问本地 1Panel 风格基础设施（127.0.0.1:5432/6379）
-      - SQL_DSN=${SQL_DSN}
-      - REDIS_CONN_STRING=${REDIS_CONN_STRING}
-      - TZ=${TZ:-Asia/Shanghai}
-      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
 
 volumes:
   dev_data:

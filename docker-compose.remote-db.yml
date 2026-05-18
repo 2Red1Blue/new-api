@@ -16,19 +16,14 @@ services:
     image: new-api-dev:local
     container_name: new-api-dev
     restart: unless-stopped
+    # host.containers.internal 是 Podman 容器内访问宿主机的特殊地址
+    # 5433/6381 是通过 SSH 隧道转发的服务器端口
     env_file:
       - .env.remote-db
     ports:
       - "3000:3000"
     volumes:
       - dev_data:/data
-    environment:
-      # host.containers.internal 是 Podman 容器内访问宿主机的特殊地址
-      # 5433/6381 是通过 SSH 隧道转发的服务器端口
-      - SQL_DSN=${SQL_DSN}
-      - REDIS_CONN_STRING=${REDIS_CONN_STRING}
-      - TZ=${TZ:-Asia/Shanghai}
-      - BATCH_UPDATE_ENABLED=${BATCH_UPDATE_ENABLED:-true}
 
 volumes:
   dev_data:
