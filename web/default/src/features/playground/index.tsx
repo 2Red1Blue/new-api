@@ -49,10 +49,11 @@ export function Playground() {
     null
   )
 
-  // Load models
+  // Load models（按当前分组过滤；切换分组时 queryKey 变化自动重拉）
   const { data: modelsData, isLoading: isLoadingModels } = useQuery({
-    queryKey: ['playground-models'],
-    queryFn: getUserModels,
+    queryKey: ['playground-models', config.group],
+    queryFn: () => getUserModels(config.group),
+    enabled: Boolean(config.group),
   })
 
   // Load groups

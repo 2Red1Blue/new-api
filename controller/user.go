@@ -531,11 +531,20 @@ func GetUserModels(c *gin.Context) {
 		return
 	}
 	groups := service.GetUserUsableGroups(user.Group)
+	// 可选 query 参数 group：按指定分组过滤。
+	// 仅当该分组属于用户可用分组时生效，避免越权读取其它分组的模型。
+	requestedGroup := c.Query("group")
 	var models []string
-	for group := range groups {
-		for _, g := range model.GetGroupEnabledModels(group) {
-			if !common.StringsContains(models, g) {
-				models = append(models, g)
+	if requestedGroup != "" {
+		if _, ok := groups[requestedGroup]; ok {
+			models = model.GetGroupEnabledModels(requestedGroup)
+		}
+	} else {
+		for group := range groups {
+			for _, g := range model.GetGroupEnabledModels(group) {
+				if !common.StringsContains(models, g) {
+					models = append(models, g)
+				}
 			}
 		}
 	}

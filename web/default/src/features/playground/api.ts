@@ -38,10 +38,13 @@ export async function sendChatCompletion(
 }
 
 /**
- * Get user available models
+ * Get user available models, optionally filtered by group
  */
-export async function getUserModels(): Promise<ModelOption[]> {
-  const res = await api.get(API_ENDPOINTS.USER_MODELS)
+export async function getUserModels(group?: string): Promise<ModelOption[]> {
+  const url = group
+    ? `${API_ENDPOINTS.USER_MODELS}?group=${encodeURIComponent(group)}`
+    : API_ENDPOINTS.USER_MODELS
+  const res = await api.get(url)
   const { data } = res
 
   if (!data.success || !Array.isArray(data.data)) {
