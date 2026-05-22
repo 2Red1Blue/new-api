@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -67,6 +68,40 @@ func clearChannelInfo(channel *model.Channel) {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
 		channel.ChannelInfo.MultiKeyDisabledTime = nil
 	}
+}
+
+func attachUpstreamProfiles(channels []*model.Channel) {
+	ids := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		if channel != nil {
+			ids = append(ids, channel.Id)
+		}
+	}
+	profiles, err := model.GetChannelUpstreamProfilesByChannelIds(ids)
+	if err != nil {
+		common.SysLog("failed to attach upstream profiles: " + err.Error())
+		return
+	}
+	for _, channel := range channels {
+		if profile, ok := profiles[channel.Id]; ok {
+			channel.UpstreamProfile = &profile
+		}
+	}
+}
+
+func attachUpstreamProfile(channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+	profile, err := model.GetChannelUpstreamProfileByChannelId(channel.Id)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			common.SysLog(fmt.Sprintf("failed to attach upstream profile for channel #%d: %s", channel.Id, err.Error()))
+		}
+		return
+	}
+	summary := profile.Summary()
+	channel.UpstreamProfile = &summary
 }
 
 func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
@@ -160,6 +195,7 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
+	attachUpstreamProfiles(channelData)
 
 	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
 	var results []struct {
@@ -366,6 +402,7 @@ func SearchChannels(c *gin.Context) {
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
+	attachUpstreamProfiles(pagedData)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -392,6 +429,7 @@ func GetChannel(c *gin.Context) {
 	}
 	if channel != nil {
 		clearChannelInfo(channel)
+		attachUpstreamProfile(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -432,6 +470,40 @@ func GetChannelKey(c *gin.Context) {
 		"message": "获取成功",
 		"data": map[string]interface{}{
 			"key": channel.Key,
+		},
+	})
+}
+
+func GetUpstreamPasswordFeature(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"enabled": service.IsUpstreamPasswordEnabled(),
+		},
+	})
+}
+
+func GetChannelUpstreamPassword(c *gin.Context) {
+	channelId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("渠道ID格式错误: %v", err))
+		return
+	}
+	profile, err := model.GetChannelUpstreamProfileByChannelId(channelId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	password, err := service.DecryptUpstreamPassword(profile.UpstreamPasswordEnc)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RecordLog(c.GetInt("id"), model.LogTypeSystem, fmt.Sprintf("查看渠道上游密码 (渠道ID: %d)", channelId))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"password": password,
 		},
 	})
 }
@@ -546,10 +618,11 @@ func RefreshCodexChannelCredential(c *gin.Context) {
 }
 
 type AddChannelRequest struct {
-	Mode                      string                `json:"mode"`
-	MultiKeyMode              constant.MultiKeyMode `json:"multi_key_mode"`
-	BatchAddSetKeyPrefix2Name bool                  `json:"batch_add_set_key_prefix_2_name"`
-	Channel                   *model.Channel        `json:"channel"`
+	Mode                      string                             `json:"mode"`
+	MultiKeyMode              constant.MultiKeyMode              `json:"multi_key_mode"`
+	BatchAddSetKeyPrefix2Name bool                               `json:"batch_add_set_key_prefix_2_name"`
+	Channel                   *model.Channel                     `json:"channel"`
+	UpstreamProfile           *model.ChannelUpstreamProfileInput `json:"upstream_profile"`
 }
 
 func getVertexArrayKeys(keys string) ([]string, error) {
@@ -599,6 +672,17 @@ func AddChannel(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+	upstreamPasswordEnc := ""
+	if addChannelRequest.UpstreamProfile != nil && strings.TrimSpace(addChannelRequest.UpstreamProfile.UpstreamPassword) != "" {
+		upstreamPasswordEnc, err = service.EncryptUpstreamPassword(addChannelRequest.UpstreamProfile.UpstreamPassword)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
@@ -676,6 +760,16 @@ func AddChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if addChannelRequest.UpstreamProfile != nil && len(channels) > 0 {
+		for _, channel := range channels {
+			if strings.TrimSpace(channel.Key) == "" {
+				continue
+			}
+			if _, err := model.UpsertChannelUpstreamProfile(&channel, *addChannelRequest.UpstreamProfile, upstreamPasswordEnc); err != nil {
+				common.SysLog(fmt.Sprintf("failed to save upstream profile for channel #%d: %s", channel.Id, err.Error()))
+			}
+		}
+	}
 	service.ResetProxyClientCache()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -691,6 +785,9 @@ func DeleteChannel(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if err := model.DeleteChannelUpstreamProfile(id); err != nil {
+		common.SysLog(fmt.Sprintf("failed to delete upstream profile for channel #%d: %s", id, err.Error()))
 	}
 	model.InitChannelCache()
 	c.JSON(http.StatusOK, gin.H{
@@ -856,8 +953,9 @@ func DeleteChannelBatch(c *gin.Context) {
 
 type PatchChannel struct {
 	model.Channel
-	MultiKeyMode *string `json:"multi_key_mode"`
-	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
+	MultiKeyMode    *string                            `json:"multi_key_mode"`
+	KeyMode         *string                            `json:"key_mode"` // 多key模式下密钥覆盖或者追加
+	UpstreamProfile *model.ChannelUpstreamProfilePatch `json:"upstream_profile"`
 }
 
 func UpdateChannel(c *gin.Context) {
@@ -974,15 +1072,41 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
+	upstreamPasswordEnc := ""
+	if channel.UpstreamProfile != nil && strings.TrimSpace(channel.UpstreamProfile.UpstreamPassword) != "" {
+		upstreamPasswordEnc, err = service.EncryptUpstreamPassword(channel.UpstreamProfile.UpstreamPassword)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	}
 	err = channel.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if channel.UpstreamProfile != nil {
+		if _, err := model.UpdateChannelUpstreamProfile(channel.Id, *channel.UpstreamProfile, upstreamPasswordEnc); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				fullChannel, getErr := model.GetChannelById(channel.Id, true)
+				if getErr == nil && strings.TrimSpace(fullChannel.Key) != "" {
+					if _, upsertErr := model.UpsertChannelUpstreamProfile(fullChannel, model.ChannelUpstreamProfileInput(channel.UpstreamProfile.ChannelUpstreamProfileInput), upstreamPasswordEnc); upsertErr != nil {
+						common.SysLog(fmt.Sprintf("failed to create upstream profile for channel #%d: %s", channel.Id, upsertErr.Error()))
+					}
+				}
+			} else {
+				common.SysLog(fmt.Sprintf("failed to update upstream profile for channel #%d: %s", channel.Id, err.Error()))
+			}
+		}
+	}
 	model.InitChannelCache()
 	service.ResetProxyClientCache()
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
+	attachUpstreamProfile(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

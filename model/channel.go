@@ -56,6 +56,8 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+
+	UpstreamProfile *ChannelUpstreamProfileSummary `json:"upstream_profile,omitempty" gorm:"-"`
 }
 
 type ChannelInfo struct {
@@ -437,6 +439,7 @@ func BatchInsertChannels(channels []Channel) error {
 		}
 	}()
 
+	inserted := make([]Channel, 0, len(channels))
 	for _, chunk := range lo.Chunk(channels, 50) {
 		if err := tx.Create(&chunk).Error; err != nil {
 			tx.Rollback()
@@ -448,7 +451,9 @@ func BatchInsertChannels(channels []Channel) error {
 				return err
 			}
 		}
+		inserted = append(inserted, chunk...)
 	}
+	copy(channels, inserted)
 	return tx.Commit().Error
 }
 
@@ -467,6 +472,10 @@ func BatchDeleteChannels(ids []int) error {
 			return err
 		}
 		if err := tx.Where("channel_id in (?)", chunk).Delete(&Ability{}).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Where("channel_id in (?)", chunk).Delete(&ChannelUpstreamProfile{}).Error; err != nil {
 			tx.Rollback()
 			return err
 		}

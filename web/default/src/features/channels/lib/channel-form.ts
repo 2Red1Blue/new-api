@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 import { CHANNEL_STATUS, MODEL_FETCHABLE_TYPES } from '../constants'
-import type { Channel } from '../types'
+import type {
+  Channel,
+  ChannelUpstreamProfilePayload,
+  UpdateChannelRequest,
+} from '../types'
 
 // ============================================================================
 // Form Validation Schema
@@ -74,10 +78,22 @@ export const channelFormSchema = z.object({
   allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
   allow_speed: z.boolean().optional(), // Anthropic: speed mode control
   claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
+  upstream_rpm_limit: z.number().optional(),
   // Upstream model update settings (stored in settings JSON)
   upstream_model_update_check_enabled: z.boolean().optional(),
   upstream_model_update_auto_sync_enabled: z.boolean().optional(),
   upstream_model_update_ignored_models: z.string().optional(),
+  // Upstream profile and notification settings
+  upstream_key_label: z.string().optional(),
+  upstream_account: z.string().optional(),
+  upstream_password: z.string().optional(),
+  upstream_login_url: z.string().optional(),
+  upstream_group: z.string().optional(),
+  upstream_group_ratio: z.number().optional(),
+  upstream_group_ratios: z.string().optional(),
+  insufficient_balance_keywords: z.string().max(1024).optional(),
+  upstream_notify_enabled: z.boolean().optional(),
+  clear_upstream_password: z.boolean().optional(),
 })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -132,9 +148,20 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
+  upstream_rpm_limit: 0,
   upstream_model_update_check_enabled: false,
   upstream_model_update_auto_sync_enabled: false,
   upstream_model_update_ignored_models: '',
+  upstream_key_label: '',
+  upstream_account: '',
+  upstream_password: '',
+  upstream_login_url: '',
+  upstream_group: '',
+  upstream_group_ratio: 0,
+  upstream_group_ratios: '',
+  insufficient_balance_keywords: '',
+  upstream_notify_enabled: true,
+  clear_upstream_password: false,
 }
 
 // ============================================================================
@@ -186,6 +213,7 @@ export function transformChannelToFormDefaults(
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
+  let upstreamRpmLimit = 0
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -204,6 +232,10 @@ export function transformChannelToFormDefaults(
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
+      upstreamRpmLimit =
+        typeof parsed.upstream_rpm_limit === 'number'
+          ? parsed.upstream_rpm_limit
+          : 0
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -258,11 +290,60 @@ export function transformChannelToFormDefaults(
     allow_inference_geo: allowInferenceGeo,
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
+    upstream_rpm_limit: upstreamRpmLimit,
     allow_safety_identifier: allowSafetyIdentifier,
     upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
     upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
     upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    upstream_key_label: channel.upstream_profile?.key_label || '',
+    upstream_account: channel.upstream_profile?.upstream_account || '',
+    upstream_password: '',
+    upstream_login_url: channel.upstream_profile?.upstream_login_url || '',
+    upstream_group: channel.upstream_profile?.upstream_group || '',
+    upstream_group_ratio: channel.upstream_profile?.upstream_group_ratio || 0,
+    upstream_group_ratios: channel.upstream_profile?.upstream_group_ratios || '',
+    insufficient_balance_keywords:
+      channel.upstream_profile?.insufficient_balance_keywords || '',
+    upstream_notify_enabled: channel.upstream_profile?.notify_enabled ?? true,
+    clear_upstream_password: false,
   }
+}
+
+function buildUpstreamProfilePayload(
+  formData: ChannelFormValues,
+  includeClearPassword: boolean
+): ChannelUpstreamProfilePayload | undefined {
+  const payload: ChannelUpstreamProfilePayload = {
+    key_label: formData.upstream_key_label?.trim() || '',
+    upstream_account: formData.upstream_account?.trim() || '',
+    upstream_password: formData.upstream_password?.trim() || '',
+    upstream_login_url: formData.upstream_login_url?.trim() || '',
+    upstream_group: formData.upstream_group?.trim() || '',
+    upstream_group_ratio: formData.upstream_group_ratio || 0,
+    upstream_group_ratios: formData.upstream_group_ratios?.trim() || '',
+    insufficient_balance_keywords:
+      formData.insufficient_balance_keywords?.trim() || '',
+    notify_enabled: formData.upstream_notify_enabled ?? true,
+  }
+
+  if (includeClearPassword) {
+    payload.clear_password = formData.clear_upstream_password === true
+  }
+
+  const hasUsefulValue = Boolean(
+    payload.key_label ||
+      payload.upstream_account ||
+      payload.upstream_password ||
+      payload.upstream_login_url ||
+      payload.upstream_group ||
+      payload.upstream_group_ratio ||
+      payload.upstream_group_ratios ||
+      payload.insufficient_balance_keywords ||
+      payload.notify_enabled === false ||
+      payload.clear_password
+  )
+
+  return hasUsefulValue ? payload : undefined
 }
 
 /**
@@ -360,6 +441,13 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     if ('claude_beta_query' in settingsObj) delete settingsObj.claude_beta_query
   }
 
+  const upstreamRPMLimit = Number(formData.upstream_rpm_limit || 0)
+  if (upstreamRPMLimit > 0) {
+    settingsObj.upstream_rpm_limit = Math.floor(upstreamRPMLimit)
+  } else if ('upstream_rpm_limit' in settingsObj) {
+    delete settingsObj.upstream_rpm_limit
+  }
+
   // Upstream model update settings (for model-fetchable channel types)
   if (MODEL_FETCHABLE_TYPES.has(formData.type)) {
     settingsObj.upstream_model_update_check_enabled =
@@ -397,6 +485,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
   multi_key_mode?: 'random' | 'polling'
   batch_add_set_key_prefix_2_name?: boolean
   channel: Partial<Channel>
+  upstream_profile?: ChannelUpstreamProfilePayload
 } {
   const mode = formData.multi_key_mode || 'single'
 
@@ -438,6 +527,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     batch_add_set_key_prefix_2_name:
       mode === 'batch' ? formData.batch_add_set_key_prefix_2_name : undefined,
     channel,
+    upstream_profile: buildUpstreamProfilePayload(formData, false),
   }
 }
 
@@ -447,8 +537,8 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
 export function transformFormDataToUpdatePayload(
   formData: ChannelFormValues,
   channelId: number
-): Partial<Channel> {
-  const payload: Partial<Channel> = {
+): UpdateChannelRequest {
+  const payload: UpdateChannelRequest = {
     id: channelId,
     name: formData.name,
     type: formData.type,
@@ -494,6 +584,7 @@ export function transformFormDataToUpdatePayload(
   payload.status_code_mapping = formData.status_code_mapping || ''
   payload.param_override = formData.param_override || ''
   payload.header_override = formData.header_override || ''
+  payload.upstream_profile = buildUpstreamProfilePayload(formData, true)
 
   return payload
 }

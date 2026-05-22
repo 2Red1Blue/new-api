@@ -34,7 +34,7 @@ func withHeaderNavModules(t *testing.T, raw string) {
 	})
 }
 
-func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool) *httptest.ResponseRecorder {
+func performHeaderNavRequestWithRole(t *testing.T, handler gin.HandlerFunc, authenticated bool, role int) *httptest.ResponseRecorder {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -43,7 +43,7 @@ func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticate
 	router.GET("/login", func(c *gin.Context) {
 		session := sessions.Default(c)
 		session.Set("username", "tester")
-		session.Set("role", common.RoleCommonUser)
+		session.Set("role", role)
 		session.Set("id", 1)
 		session.Set("status", common.UserStatusEnabled)
 		session.Set("group", "default")
@@ -76,6 +76,11 @@ func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticate
 	}
 	router.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool) *httptest.ResponseRecorder {
+	t.Helper()
+	return performHeaderNavRequestWithRole(t, handler, authenticated, common.RoleCommonUser)
 }
 
 func TestHeaderNavModuleAuthAllowsDefaultPublicAccess(t *testing.T) {
@@ -120,6 +125,15 @@ func TestHeaderNavModuleAuthRejectsLegacyDisabledModule(t *testing.T) {
 	recorder := performHeaderNavRequest(t, HeaderNavModuleAuth("rankings"), false)
 
 	require.Equal(t, http.StatusForbidden, recorder.Code)
+}
+
+func TestHeaderNavModuleAuthAllowsRootWhenModuleDisabled(t *testing.T) {
+	raw := `{"rankings":false}`
+	withHeaderNavModules(t, raw)
+
+	recorder := performHeaderNavRequestWithRole(t, HeaderNavModuleAuth("rankings"), true, common.RoleRootUser)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestHeaderNavModulePublicOrUserAuthAllowsDefaultPublicAccess(t *testing.T) {

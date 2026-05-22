@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const upstreamInsufficientBalanceContextKey = "upstream_insufficient_balance_error"
+const channelRateLimitedContextKey = "channel_rate_limited_error"
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
@@ -88,6 +92,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			if c.GetBool(upstreamInsufficientBalanceContextKey) {
+				newAPIError = types.NewErrorWithStatusCode(
+					fmt.Errorf("upstream channel is temporarily unavailable, please retry later"),
+					types.ErrorCodeBadResponseStatusCode,
+					http.StatusServiceUnavailable,
+					types.ErrOptionWithNoRecordErrorLog(),
+				)
+			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", newAPIError.Error()))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
@@ -183,17 +195,22 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		TokenGroup: relayInfo.TokenGroup,
 		ModelName:  relayInfo.OriginModelName,
 		Retry:      common.GetPointer(0),
+		Excluded:   make(map[int]struct{}),
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		c.Set(channelRateLimitedContextKey, false)
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
-			break
+			if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), false) {
+				break
+			}
+			continue
 		}
 
 		addUsedChannel(c, channel.Id)
@@ -228,9 +245,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		isInsufficientBalance := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		if retryParam.Excluded != nil {
+			retryParam.Excluded[channel.Id] = struct{}{}
+		}
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		if isInsufficientBalance {
+			break
+		}
+		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), isInsufficientBalance) {
 			break
 		}
 	}
@@ -258,6 +281,17 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+func getAttemptedChannelIDs(c *gin.Context) map[int]struct{} {
+	result := make(map[int]struct{})
+	for _, channelIDStr := range c.GetStringSlice("use_channel") {
+		channelID, err := strconv.Atoi(channelIDStr)
+		if err == nil && channelID > 0 {
+			result[channelID] = struct{}{}
+		}
+	}
+	return result
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -291,6 +325,22 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
 	if info.ChannelMeta == nil {
+		channelID := c.GetInt("channel_id")
+		channel, err := model.CacheGetChannel(channelID)
+		if err == nil && channel != nil {
+			if retryParam.GetRetry() == 0 && !service.CheckAndReserveChannelRPM(channel) {
+				if retryParam.Excluded != nil {
+					retryParam.Excluded[channel.Id] = struct{}{}
+				}
+				c.Set(channelRateLimitedContextKey, true)
+				info.ChannelMeta = &relaycommon.ChannelMeta{}
+				return nil, types.NewErrorWithStatusCode(
+					fmt.Errorf("channel #%d reached upstream RPM limit", channel.Id),
+					types.ErrorCodeGetChannelFailed,
+					http.StatusTooManyRequests,
+				)
+			}
+		}
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
@@ -314,6 +364,21 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
+	if !service.CheckAndReserveChannelRPM(channel) {
+		if retryParam.Excluded != nil {
+			retryParam.Excluded[channel.Id] = struct{}{}
+			for channelID := range getAttemptedChannelIDs(c) {
+				retryParam.Excluded[channelID] = struct{}{}
+			}
+		}
+		c.Set(channelRateLimitedContextKey, true)
+		return nil, types.NewErrorWithStatusCode(
+			fmt.Errorf("channel #%d reached upstream RPM limit", channel.Id),
+			types.ErrorCodeGetChannelFailed,
+			http.StatusTooManyRequests,
+		)
+	}
+
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
 		return nil, newAPIError
@@ -321,17 +386,8 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
-func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, forceRetry bool) bool {
 	if openaiErr == nil {
-		return false
-	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
-	}
-	if types.IsChannelError(openaiErr) {
-		return true
-	}
-	if types.IsSkipRetryError(openaiErr) {
 		return false
 	}
 	if retryTimes <= 0 {
@@ -341,11 +397,28 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 		return false
 	}
 	code := openaiErr.StatusCode
-	if code >= 200 && code < 300 {
+	isRateLimit := code == http.StatusTooManyRequests
+	isUnavailable := forceRetry || c.GetBool(channelRateLimitedContextKey) || code >= 500 || code < 100 || code > 599
+	if isRateLimit {
+		if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !service.ShouldBreakChannelAffinityOnRateLimit(c) {
+			return false
+		}
+		return operation_setting.ShouldRetryByStatusCode(code)
+	}
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !(isUnavailable && service.ShouldBreakChannelAffinityOnUnavailable(c)) {
 		return false
 	}
-	if code < 100 || code > 599 {
+	if types.IsChannelError(openaiErr) {
 		return true
+	}
+	if forceRetry {
+		return true
+	}
+	if types.IsSkipRetryError(openaiErr) {
+		return false
+	}
+	if code >= 200 && code < 300 {
+		return false
 	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
 		return false
@@ -353,13 +426,29 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
+	errorMessage := err.ErrorWithStatusCode()
+	matchedKeyword, isInsufficientBalance := service.IsInsufficientBalanceError(channelError.ChannelId, channelError.UsingKey, errorMessage)
+	if isInsufficientBalance {
+		c.Set(upstreamInsufficientBalanceContextKey, true)
+		logger.LogWarn(c, fmt.Sprintf("channel #%d upstream insufficient balance detected, keyword=%s", channelError.ChannelId, matchedKeyword))
+		modelName := c.GetString("original_model")
+		usingGroup := c.GetString("group")
+		gopool.Go(func() {
+			service.NotifyChannelInsufficientBalance(service.UpstreamInsufficientNotificationContext{
+				ChannelError: channelError,
+				ErrorMessage: errorMessage,
+				ModelName:    modelName,
+				UsingGroup:   usingGroup,
+			})
+		})
+	}
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if (service.ShouldDisableChannel(err) || isInsufficientBalance) && channelError.AutoBan {
 		gopool.Go(func() {
-			service.DisableChannel(channelError, err.ErrorWithStatusCode())
+			service.DisableChannel(channelError, errorMessage)
 		})
 	}
 
@@ -398,6 +487,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
+	return isInsufficientBalance
 }
 
 func RelayMidjourney(c *gin.Context) {

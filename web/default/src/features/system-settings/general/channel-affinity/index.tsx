@@ -54,10 +54,14 @@ function parseRules(jsonStr: string): AffinityRule[] {
   try {
     const arr = JSON.parse(jsonStr || '[]')
     if (!Array.isArray(arr)) return []
-    return arr.map(
-      (r: Record<string, unknown>, i: number) =>
-        ({ id: i, ...r }) as AffinityRule
-    )
+    return arr.map((r: Record<string, unknown>, i: number) => {
+      const rule = { id: i, ...r } as AffinityRule
+      rule.break_affinity_on_unavailable =
+        rule.break_affinity_on_unavailable ?? true
+      rule.break_affinity_on_rate_limit =
+        rule.break_affinity_on_rate_limit ?? false
+      return rule
+    })
   } catch {
     return []
   }
@@ -485,7 +489,7 @@ export function ChannelAffinitySection(props: Props) {
                   <TableHead>{t('Key Sources')}</TableHead>
                   <TableHead>{t('TTL')}</TableHead>
                   <TableHead>{t('Retry')}</TableHead>
-                  <TableHead>{t('Scope')}</TableHead>
+                  <TableHead>{t('Break')}</TableHead>
                   <TableHead>{t('Cache')}</TableHead>
                   <TableHead className='text-right'>{t('Actions')}</TableHead>
                 </TableRow>
@@ -583,19 +587,20 @@ export function ChannelAffinitySection(props: Props) {
                       </TableCell>
                       <TableCell>
                         {(() => {
-                          const scopeItems = [
-                            rule.include_using_group && t('Group'),
-                            rule.include_model_name && t('Model'),
-                            rule.include_rule_name && t('Rule'),
+                          const breakItems = [
+                            rule.break_affinity_on_unavailable &&
+                              t('Unavailable'),
+                            rule.break_affinity_on_rate_limit &&
+                              t('Rate Limit'),
                           ].filter(Boolean) as string[]
-                          if (scopeItems.length === 0) return '-'
+                          if (breakItems.length === 0) return '-'
                           return (
                             <div className='text-muted-foreground flex items-center gap-1.5 text-xs font-medium'>
                               <span
                                 className='size-1.5 shrink-0 rounded-full bg-slate-400'
                                 aria-hidden='true'
                               />
-                              {scopeItems.map((item, idx, arr) => (
+                              {breakItems.map((item, idx, arr) => (
                                 <span
                                   key={idx}
                                   className='flex items-center gap-1.5'

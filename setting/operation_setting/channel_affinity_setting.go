@@ -21,6 +21,13 @@ type ChannelAffinityRule struct {
 	ParamOverrideTemplate map[string]interface{} `json:"param_override_template,omitempty"`
 
 	SkipRetryOnFailure bool `json:"skip_retry_on_failure"`
+	// BreakAffinityOnUnavailable allows retrying another channel for errors that
+	// mean the sticky channel is unavailable, such as insufficient balance,
+	// disabled channel, or upstream 5xx.
+	BreakAffinityOnUnavailable bool `json:"break_affinity_on_unavailable"`
+	// BreakAffinityOnRateLimit controls whether 429/rate-limit errors can break
+	// sticky routing. Keep this conservative by default for CLI/session traffic.
+	BreakAffinityOnRateLimit bool `json:"break_affinity_on_rate_limit"`
 
 	IncludeUsingGroup bool `json:"include_using_group"`
 	IncludeModelName  bool `json:"include_model_name"`
@@ -86,13 +93,15 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "gjson", Path: "prompt_cache_key"},
 			},
-			ValueRegex:            "",
-			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(codexCliPassThroughHeaders),
-			SkipRetryOnFailure:    true,
-			IncludeUsingGroup:     true,
-			IncludeRuleName:       true,
-			UserAgentInclude:      nil,
+			ValueRegex:                 "",
+			TTLSeconds:                 0,
+			ParamOverrideTemplate:      buildPassHeaderTemplate(codexCliPassThroughHeaders),
+			SkipRetryOnFailure:         true,
+			BreakAffinityOnUnavailable: true,
+			BreakAffinityOnRateLimit:   false,
+			IncludeUsingGroup:          true,
+			IncludeRuleName:            true,
+			UserAgentInclude:           nil,
 		},
 		{
 			Name:       "claude cli trace",
@@ -101,13 +110,15 @@ var channelAffinitySetting = ChannelAffinitySetting{
 			KeySources: []ChannelAffinityKeySource{
 				{Type: "gjson", Path: "metadata.user_id"},
 			},
-			ValueRegex:            "",
-			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(claudeCliPassThroughHeaders),
-			SkipRetryOnFailure:    true,
-			IncludeUsingGroup:     true,
-			IncludeRuleName:       true,
-			UserAgentInclude:      nil,
+			ValueRegex:                 "",
+			TTLSeconds:                 0,
+			ParamOverrideTemplate:      buildPassHeaderTemplate(claudeCliPassThroughHeaders),
+			SkipRetryOnFailure:         true,
+			BreakAffinityOnUnavailable: true,
+			BreakAffinityOnRateLimit:   false,
+			IncludeUsingGroup:          true,
+			IncludeRuleName:            true,
+			UserAgentInclude:           nil,
 		},
 	},
 }

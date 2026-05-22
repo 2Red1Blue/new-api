@@ -129,6 +129,9 @@ export const STATIC_I18N_KEYS = [
   'Expired time cannot be earlier than current time',
   'Quota must be a positive number',
   'Successfully created {{count}} redemption codes',
+  'Copy selected names and codes',
+  'Names and codes copied!',
+  'Copy selected codes only',
 
   // Home page (constants-driven labels)
   'Cost Tracking',
@@ -194,6 +197,8 @@ export const STATIC_I18N_KEYS = [
   'Yunxi AI',
   'Clouds pass without a sound,',
   'and the stream carries light forward.',
+  'Copy API endpoint',
+  'API endpoint copied!',
 
   // User management (interpolated keys)
   'Remaining Quota ({{currency}})',

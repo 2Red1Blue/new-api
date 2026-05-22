@@ -34,6 +34,32 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
+export const channelUpstreamProfileSchema = z.object({
+  id: z.number(),
+  channel_id: z.number(),
+  key_fingerprint: z.string().default(''),
+  key_masked: z.string().default(''),
+  key_label: z.string().default(''),
+  upstream_account: z.string().default(''),
+  upstream_login_url: z.string().default(''),
+  upstream_group: z.string().default(''),
+  upstream_group_ratio: z.number().default(0),
+  upstream_group_ratios: z.string().default(''),
+  insufficient_balance_keywords: z.string().default(''),
+  notify_enabled: z.boolean().default(true),
+  password_configured: z.boolean().default(false),
+  last_insufficient_at: z.number().default(0),
+  last_insufficient_reason: z.string().default(''),
+  last_notified_at: z.number().default(0),
+  notify_suppress_until: z.number().default(0),
+  created_at: z.number().default(0),
+  updated_at: z.number().default(0),
+})
+
+export type ChannelUpstreamProfile = z.infer<
+  typeof channelUpstreamProfileSchema
+>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -71,6 +97,7 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  upstream_profile: channelUpstreamProfileSchema.nullish(),
 })
 
 export type Channel = z.infer<typeof channelSchema>
@@ -100,6 +127,7 @@ export interface ChannelOtherSettings {
   allow_inference_geo?: boolean
   allow_speed?: boolean
   claude_beta_query?: boolean
+  upstream_rpm_limit?: number
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]
@@ -324,6 +352,23 @@ export interface ChannelFormData {
   batch_add_set_key_prefix_2_name?: boolean
 }
 
+export interface ChannelUpstreamProfilePayload {
+  key_label?: string
+  upstream_account?: string
+  upstream_password?: string
+  upstream_login_url?: string
+  upstream_group?: string
+  upstream_group_ratio?: number
+  upstream_group_ratios?: string
+  insufficient_balance_keywords?: string
+  notify_enabled?: boolean
+  clear_password?: boolean
+}
+
+export type UpdateChannelRequest = Omit<Partial<Channel>, 'upstream_profile'> & {
+  upstream_profile?: ChannelUpstreamProfilePayload
+}
+
 // ============================================================================
 // Add Channel Request (special structure)
 // ============================================================================
@@ -333,4 +378,5 @@ export interface AddChannelRequest {
   multi_key_mode?: 'random' | 'polling'
   batch_add_set_key_prefix_2_name?: boolean
   channel: Partial<Channel>
+  upstream_profile?: ChannelUpstreamProfilePayload
 }

@@ -111,8 +111,10 @@ import {
   getAllModels,
   getChannel,
   getChannelKey,
+  getChannelUpstreamPassword,
   getGroups,
   getPrefillGroups,
+  getUpstreamPasswordFeature,
   refreshCodexCredential,
   updateChannel,
 } from '../../api'
@@ -304,6 +306,9 @@ export function ChannelMutateDrawer({
   const [fetchModelsDialogOpen, setFetchModelsDialogOpen] = useState(false)
   const [channelKey, setChannelKey] = useState<string | null>(null)
   const [isChannelKeyLoading, setIsChannelKeyLoading] = useState(false)
+  const [upstreamPassword, setUpstreamPassword] = useState<string | null>(null)
+  const [isUpstreamPasswordLoading, setIsUpstreamPasswordLoading] =
+    useState(false)
   const [codexOAuthDialogOpen, setCodexOAuthDialogOpen] = useState(false)
   const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
     useState(false)
@@ -353,6 +358,11 @@ export function ChannelMutateDrawer({
     queryFn: () => getPrefillGroups('model'),
   })
 
+  const { data: upstreamPasswordFeature } = useQuery({
+    queryKey: ['channel_upstream_password_feature'],
+    queryFn: getUpstreamPasswordFeature,
+  })
+
   const { copyToClipboard } = useCopyToClipboard()
 
   const {
@@ -370,10 +380,16 @@ export function ChannelMutateDrawer({
     if (!open) {
       setChannelKey(null)
       setIsChannelKeyLoading(false)
+      setUpstreamPassword(null)
+      setIsUpstreamPasswordLoading(false)
     } else if (channelId) {
       setChannelKey(null)
+      setUpstreamPassword(null)
     }
   }, [open, channelId])
+
+  const upstreamPasswordEnabled =
+    upstreamPasswordFeature?.data?.enabled === true
 
   // Check if this is a multi-key channel
   const isMultiKeyChannel =
@@ -725,6 +741,44 @@ export function ChannelMutateDrawer({
       }
     }
   }, [channelId, withVerification, fetchChannelKey])
+
+  const fetchUpstreamPassword = useCallback(async () => {
+    if (!channelId) {
+      throw new Error('Channel is not selected')
+    }
+
+    setIsUpstreamPasswordLoading(true)
+    try {
+      const res = await getChannelUpstreamPassword(channelId)
+      if (!res.success) {
+        throw new Error(res.message || t('Failed to fetch upstream password'))
+      }
+
+      const passwordValue = res.data?.password ?? ''
+      setUpstreamPassword(passwordValue)
+      toast.success(t('Upstream password unlocked'))
+      return res
+    } finally {
+      setIsUpstreamPasswordLoading(false)
+    }
+  }, [channelId, t])
+
+  const handleRevealUpstreamPassword = useCallback(async () => {
+    if (!channelId) return
+
+    try {
+      await withVerification(fetchUpstreamPassword, {
+        preferredMethod: 'passkey',
+        title: 'Verify to view upstream password',
+        description:
+          'Use Passkey or 2FA to confirm your identity before revealing the upstream account password.',
+      })
+    } catch (error) {
+      if (error instanceof Error) {
+        toast.error(error.message)
+      }
+    }
+  }, [channelId, withVerification, fetchUpstreamPassword])
 
   const handleRefreshCodexCredential = useCallback(async () => {
     if (!channelId) return
@@ -2169,6 +2223,303 @@ export function ChannelMutateDrawer({
                 )}
               </div>
 
+              {/* ── Upstream Profile ── */}
+              <div className='bg-card space-y-4 rounded-xl border p-5'>
+                <CardHeading
+                  title={t('Upstream Profile')}
+                  icon={<Route className='h-4 w-4' />}
+                />
+                <div className='grid gap-4 sm:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='upstream_account'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Upstream Account')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder={t('Account or email used upstream')}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Shown in insufficient balance notifications.')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='upstream_login_url'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Upstream Login URL')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder='https://...'
+                            type='url'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Used as the recharge entry in email alerts.')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='upstream_group'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Upstream Group')}</FormLabel>
+                        <FormControl>
+                          <Input placeholder={t('e.g., default')} {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='upstream_group_ratio'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Upstream Group Ratio')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            step='0.0001'
+                            min='0'
+                            placeholder='1'
+                            value={field.value ?? 0}
+                            onChange={(event) =>
+                              field.onChange(Number(event.target.value) || 0)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Cost multiplier for this upstream group.')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='upstream_key_label'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Upstream Key Label')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder={t('Optional alias for this upstream key')}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className='space-y-3 rounded-lg border border-dashed p-4'>
+                  <FormField
+                    control={form.control}
+                    name='upstream_password'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Upstream Password')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='password'
+                            autoComplete='new-password'
+                            placeholder={
+                              upstreamPasswordEnabled
+                                ? t('Leave empty to keep existing password')
+                                : t(
+                                    'Set UPSTREAM_SECRET_KEY to enable password storage'
+                                  )
+                            }
+                            disabled={!upstreamPasswordEnabled}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {upstreamPasswordEnabled
+                            ? t(
+                                'Encrypted with AES-256-GCM before saving. Not included in notification emails.'
+                              )
+                            : t(
+                                'Password storage is hidden until UPSTREAM_SECRET_KEY is configured.'
+                              )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {isEditing &&
+                    channelData?.data?.upstream_profile
+                      ?.password_configured &&
+                    upstreamPasswordEnabled && (
+                      <div className='space-y-3'>
+                        <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                          <div>
+                            <p className='text-sm font-medium'>
+                              {t('Saved upstream password')}
+                            </p>
+                            <p className='text-muted-foreground text-xs'>
+                              {t(
+                                'Verification required to reveal the saved password.'
+                              )}
+                            </p>
+                          </div>
+                          <div className='flex items-center gap-2'>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              onClick={handleRevealUpstreamPassword}
+                              disabled={
+                                isUpstreamPasswordLoading ||
+                                verificationState.loading
+                              }
+                            >
+                              {isUpstreamPasswordLoading ||
+                              verificationState.loading ? (
+                                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                              ) : (
+                                <Eye className='mr-2 h-4 w-4' />
+                              )}
+                              {t('Reveal password')}
+                            </Button>
+                            <Button
+                              type='button'
+                              variant='ghost'
+                              size='sm'
+                              onClick={async () => {
+                                if (upstreamPassword) {
+                                  await copyToClipboard(upstreamPassword)
+                                }
+                              }}
+                              disabled={!upstreamPassword}
+                            >
+                              <Copy className='mr-2 h-4 w-4' />
+                              {t('Copy')}
+                            </Button>
+                          </div>
+                        </div>
+                        <Input
+                          readOnly
+                          value={upstreamPassword ?? ''}
+                          placeholder={t('Hidden — verify to reveal')}
+                          className='font-mono'
+                        />
+                        <FormField
+                          control={form.control}
+                          name='clear_upstream_password'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between gap-4'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Clear saved upstream password')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Remove the encrypted password when saving this channel.'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    )}
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='upstream_group_ratios'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Upstream Group Ratios')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder='{"default":1,"vip":0.8}'
+                          rows={3}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Optional JSON snapshot of upstream group ratios.')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='insufficient_balance_keywords'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Insufficient Balance Keywords')}
+                      </FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={t(
+                            'One keyword per line. Empty means use default keywords.'
+                          )}
+                          rows={4}
+                          maxLength={1024}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Matched against upstream errors to trigger root email notifications.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='upstream_notify_enabled'
+                  render={({ field }) => (
+                    <FormItem className='flex items-center justify-between gap-4'>
+                      <div className='space-y-0.5'>
+                        <FormLabel>{t('Insufficient Balance Alert')}</FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Notify root email once per key within the suppress window.'
+                          )}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               {/* ── Models & Groups ── */}
               <div className='bg-card space-y-4 rounded-xl border p-5'>
                 <CardHeading
@@ -2505,6 +2856,38 @@ export function ChannelMutateDrawer({
                               </FormControl>
                               <FormDescription>
                                 {t(FIELD_DESCRIPTIONS.WEIGHT)}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='upstream_rpm_limit'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Upstream RPM Limit')}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type='number'
+                                  min='0'
+                                  step='1'
+                                  placeholder={t('Empty or 0 means unlimited')}
+                                  value={field.value || ''}
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      e.target.value === ''
+                                        ? 0
+                                        : Number(e.target.value)
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Maximum requests per minute for this upstream channel.'
+                                )}
                               </FormDescription>
                               <FormMessage />
                             </FormItem>

@@ -33,11 +33,12 @@ export const Route = createFileRoute('/rankings/')({
   validateSearch: rankingsSearchSchema,
   beforeLoad: async ({ location }) => {
     const access = await getFreshModuleAccess('rankings')
-    if (!access.enabled) {
+    const { auth } = useAuthStore.getState()
+    const isRoot = (auth.user?.role ?? 0) >= 100
+    if (!access.enabled && !isRoot) {
       throw redirect({ to: '/' })
     }
-    if (access.requireAuth) {
-      const { auth } = useAuthStore.getState()
+    if (access.requireAuth || (!access.enabled && isRoot)) {
       if (!auth.user) {
         throw redirect({
           to: '/sign-in',

@@ -58,6 +58,7 @@ export function useTopNavLinks(): TopNavLink[] {
   const docsLink: string | undefined = status?.docs_link as string | undefined
 
   const isAuthed = !!auth?.user
+  const isRoot = (auth?.user?.role ?? 0) >= 100
 
   const links: TopNavLink[] = []
 
@@ -80,8 +81,12 @@ export function useTopNavLinks(): TopNavLink[] {
 
   // Rankings
   const rankings = modules?.rankings
-  if (rankings && typeof rankings === 'object' && rankings.enabled) {
-    const requiresAuth = rankings.requireAuth && !isAuthed
+  if (
+    rankings &&
+    typeof rankings === 'object' &&
+    (rankings.enabled || isRoot)
+  ) {
+    const requiresAuth = (rankings.requireAuth || !rankings.enabled) && !isAuthed
     links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
   }
 

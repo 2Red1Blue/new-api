@@ -16,9 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { CopyButton } from '@/components/copy-button'
 import { useTranslation } from 'react-i18next'
 
 const YUNXI_AI_TITLE = 'Yunxi AI'
+const API_BASE = 'https://ai.laiber.cloud'
+const API_PATHS = [
+  '/v1/chat/completions',
+  '/v1/images/generations',
+  '/v1/audio/transcriptions',
+  '/v1/embeddings',
+]
 
 interface HeroProps {
   className?: string
@@ -43,7 +51,7 @@ export function Hero(_props: HeroProps) {
 
       <section className='relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center text-center'>
         <div
-          className='landing-animate-fade-up text-[13px] leading-7 tracking-[0.18em] text-white/48 md:text-sm'
+          className='landing-animate-fade-up text-[13px] leading-7 tracking-[0.18em] text-white/60 md:text-sm'
           style={{ animationDelay: '0ms' }}
         >
           <p>{t('Clouds pass without a sound,')}</p>
@@ -68,20 +76,46 @@ export function Hero(_props: HeroProps) {
             </span>
           </h1>
 
-          <p className='mt-5 animate-[title-float_7.2s_ease-in-out_infinite] text-[12px] font-light tracking-[0.42em] text-white/44 uppercase'>
+          <p className='mt-5 animate-[title-float_7.2s_ease-in-out_infinite] text-[12px] font-light tracking-[0.42em] text-white/58 uppercase'>
             {titleSuffix}
           </p>
         </div>
 
         <div
-          className='landing-animate-fade-up mt-24 flex flex-col items-center gap-3 text-[11px] text-white/42 opacity-0'
+          className='landing-animate-fade-up mt-24 flex flex-col items-center gap-3 text-[11px] text-white/58 opacity-0'
           style={{ animationDelay: '180ms' }}
         >
           <span className='tracking-[0.16em]'>{t('API base')}</span>
-          <div className='rounded-full border border-white/10 bg-white/6 px-4 py-2 backdrop-blur'>
-            <code className='font-mono text-[11px] text-white/88'>
-              https://ai.laiber.cloud/v1
-            </code>
+          <div className='flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-2 shadow-[0_16px_50px_rgba(5,10,18,0.32)] backdrop-blur-xl'>
+            <div className='flex min-w-0 items-center rounded-full bg-white/10 px-4 py-2'>
+              <code className='min-w-0 font-mono text-[11px] text-white/88 sm:text-[12px]'>
+                <span className='whitespace-nowrap text-white/82'>
+                  {API_BASE}
+                </span>
+                <span className='mx-2 text-white/26'>|</span>
+                <span className='relative inline-flex h-[1.35em] min-w-[17.5ch] overflow-hidden align-bottom text-left text-[#8ebdff] sm:min-w-[20ch]'>
+                  <span className='animate-api-path-scroll flex flex-col'>
+                    {[...API_PATHS, API_PATHS[0]].map((path, index) => (
+                      <span
+                        key={`${path}-${index}`}
+                        className='flex h-[1.35em] items-center whitespace-nowrap'
+                      >
+                        {path}
+                      </span>
+                    ))}
+                  </span>
+                </span>
+              </code>
+            </div>
+
+            <CopyButton
+              value={`${API_BASE}${API_PATHS[0]}`}
+              className='size-9 rounded-full border border-white/10 bg-white/10 text-white/72 hover:bg-white/14 hover:text-white'
+              iconClassName='size-4'
+              tooltip={t('Copy API endpoint')}
+              successTooltip={t('API endpoint copied!')}
+              aria-label={t('Copy API endpoint')}
+            />
           </div>
         </div>
       </section>
@@ -105,6 +139,28 @@ export function Hero(_props: HeroProps) {
             opacity: 0.9;
             transform: translateX(10%) translateY(-50%);
           }
+        }
+
+        @keyframes api-path-scroll {
+          0%, 18% {
+            transform: translateY(0);
+          }
+          25%, 43% {
+            transform: translateY(-1.35em);
+          }
+          50%, 68% {
+            transform: translateY(-2.7em);
+          }
+          75%, 93% {
+            transform: translateY(-4.05em);
+          }
+          100% {
+            transform: translateY(-5.4em);
+          }
+        }
+
+        .animate-api-path-scroll {
+          animation: api-path-scroll 10s cubic-bezier(0.22, 1, 0.36, 1) infinite;
         }
       `}</style>
     </main>

@@ -20,11 +20,13 @@ import (
 )
 
 const (
-	ginKeyChannelAffinityCacheKey   = "channel_affinity_cache_key"
-	ginKeyChannelAffinityTTLSeconds = "channel_affinity_ttl_seconds"
-	ginKeyChannelAffinityMeta       = "channel_affinity_meta"
-	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
-	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
+	ginKeyChannelAffinityCacheKey         = "channel_affinity_cache_key"
+	ginKeyChannelAffinityTTLSeconds       = "channel_affinity_ttl_seconds"
+	ginKeyChannelAffinityMeta             = "channel_affinity_meta"
+	ginKeyChannelAffinityLogInfo          = "channel_affinity_log_info"
+	ginKeyChannelAffinitySkipRetry        = "channel_affinity_skip_retry_on_failure"
+	ginKeyChannelAffinityBreakUnavailable = "channel_affinity_break_on_unavailable"
+	ginKeyChannelAffinityBreakRateLimit   = "channel_affinity_break_on_rate_limit"
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
@@ -41,19 +43,21 @@ var (
 )
 
 type channelAffinityMeta struct {
-	CacheKey       string
-	TTLSeconds     int
-	RuleName       string
-	SkipRetry      bool
-	ParamTemplate  map[string]interface{}
-	KeySourceType  string
-	KeySourceKey   string
-	KeySourcePath  string
-	KeyHint        string
-	KeyFingerprint string
-	UsingGroup     string
-	ModelName      string
-	RequestPath    string
+	CacheKey         string
+	TTLSeconds       int
+	RuleName         string
+	SkipRetry        bool
+	BreakUnavailable bool
+	BreakRateLimit   bool
+	ParamTemplate    map[string]interface{}
+	KeySourceType    string
+	KeySourceKey     string
+	KeySourcePath    string
+	KeyHint          string
+	KeyFingerprint   string
+	UsingGroup       string
+	ModelName        string
+	RequestPath      string
 }
 
 type ChannelAffinityStatsContext struct {
@@ -594,19 +598,21 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
 		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
 		setChannelAffinityContext(c, channelAffinityMeta{
-			CacheKey:       cacheKeyFull,
-			TTLSeconds:     ttlSeconds,
-			RuleName:       rule.Name,
-			SkipRetry:      rule.SkipRetryOnFailure,
-			ParamTemplate:  cloneStringAnyMap(rule.ParamOverrideTemplate),
-			KeySourceType:  strings.TrimSpace(usedSource.Type),
-			KeySourceKey:   strings.TrimSpace(usedSource.Key),
-			KeySourcePath:  strings.TrimSpace(usedSource.Path),
-			KeyHint:        buildChannelAffinityKeyHint(affinityValue),
-			KeyFingerprint: affinityFingerprint(affinityValue),
-			UsingGroup:     usingGroup,
-			ModelName:      modelName,
-			RequestPath:    path,
+			CacheKey:         cacheKeyFull,
+			TTLSeconds:       ttlSeconds,
+			RuleName:         rule.Name,
+			SkipRetry:        rule.SkipRetryOnFailure,
+			BreakUnavailable: rule.BreakAffinityOnUnavailable,
+			BreakRateLimit:   rule.BreakAffinityOnRateLimit,
+			ParamTemplate:    cloneStringAnyMap(rule.ParamOverrideTemplate),
+			KeySourceType:    strings.TrimSpace(usedSource.Type),
+			KeySourceKey:     strings.TrimSpace(usedSource.Key),
+			KeySourcePath:    strings.TrimSpace(usedSource.Path),
+			KeyHint:          buildChannelAffinityKeyHint(affinityValue),
+			KeyFingerprint:   affinityFingerprint(affinityValue),
+			UsingGroup:       usingGroup,
+			ModelName:        modelName,
+			RequestPath:      path,
 		})
 
 		cache := getChannelAffinityCache()
@@ -641,6 +647,42 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 	return meta.SkipRetry
 }
 
+func ShouldBreakChannelAffinityOnUnavailable(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(ginKeyChannelAffinityBreakUnavailable)
+	if ok {
+		b, ok := v.(bool)
+		if ok {
+			return b
+		}
+	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok {
+		return false
+	}
+	return meta.BreakUnavailable
+}
+
+func ShouldBreakChannelAffinityOnRateLimit(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(ginKeyChannelAffinityBreakRateLimit)
+	if ok {
+		b, ok := v.(bool)
+		if ok {
+			return b
+		}
+	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok {
+		return false
+	}
+	return meta.BreakRateLimit
+}
+
 func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int) {
 	if c == nil || channelID <= 0 {
 		return
@@ -650,19 +692,24 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 		return
 	}
 	c.Set(ginKeyChannelAffinitySkipRetry, meta.SkipRetry)
+	c.Set(ginKeyChannelAffinityBreakUnavailable, meta.BreakUnavailable)
+	c.Set(ginKeyChannelAffinityBreakRateLimit, meta.BreakRateLimit)
 	info := map[string]interface{}{
-		"reason":         meta.RuleName,
-		"rule_name":      meta.RuleName,
-		"using_group":    meta.UsingGroup,
-		"selected_group": selectedGroup,
-		"model":          meta.ModelName,
-		"request_path":   meta.RequestPath,
-		"channel_id":     channelID,
-		"key_source":     meta.KeySourceType,
-		"key_key":        meta.KeySourceKey,
-		"key_path":       meta.KeySourcePath,
-		"key_hint":       meta.KeyHint,
-		"key_fp":         meta.KeyFingerprint,
+		"reason":                meta.RuleName,
+		"rule_name":             meta.RuleName,
+		"using_group":           meta.UsingGroup,
+		"selected_group":        selectedGroup,
+		"model":                 meta.ModelName,
+		"request_path":          meta.RequestPath,
+		"channel_id":            channelID,
+		"key_source":            meta.KeySourceType,
+		"key_key":               meta.KeySourceKey,
+		"key_path":              meta.KeySourcePath,
+		"key_hint":              meta.KeyHint,
+		"key_fp":                meta.KeyFingerprint,
+		"skip_retry_on_failure": meta.SkipRetry,
+		"break_on_unavailable":  meta.BreakUnavailable,
+		"break_on_rate_limit":   meta.BreakRateLimit,
 	}
 	c.Set(ginKeyChannelAffinityLogInfo, info)
 }

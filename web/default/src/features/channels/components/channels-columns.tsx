@@ -129,6 +129,105 @@ function renderLimitedItems(
   )
 }
 
+function UpstreamProfileCell({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const profile = channel.upstream_profile
+
+  if (!profile) {
+    return <span className='text-muted-foreground text-xs'>-</span>
+  }
+
+  const hasInsufficientState = profile.last_insufficient_at > 0
+
+  return (
+    <TooltipProvider delay={100}>
+      <Tooltip>
+        <TooltipTrigger render={<div />}>
+          <div className='flex max-w-[220px] flex-col gap-1'>
+            <div className='flex items-center gap-1.5'>
+              {profile.upstream_account ? (
+                <TruncatedText
+                  text={profile.upstream_account}
+                  className='text-xs font-medium'
+                  maxWidth='max-w-[120px]'
+                />
+              ) : (
+                <span className='text-muted-foreground text-xs'>
+                  {t('No account')}
+                </span>
+              )}
+              {profile.password_configured && (
+                <StatusBadge
+                  label={t('Password')}
+                  variant='purple'
+                  size='sm'
+                  copyable={false}
+                />
+              )}
+            </div>
+            <div className='flex items-center gap-1'>
+              {profile.upstream_group && (
+                <StatusBadge
+                  label={profile.upstream_group}
+                  variant='blue'
+                  size='sm'
+                  copyable={false}
+                />
+              )}
+              {profile.upstream_group_ratio > 0 && (
+                <StatusBadge
+                  label={`${profile.upstream_group_ratio.toFixed(4)}x`}
+                  variant='neutral'
+                  size='sm'
+                  copyable={false}
+                />
+              )}
+              {hasInsufficientState && (
+                <StatusBadge
+                  label={t('Low balance')}
+                  variant='danger'
+                  size='sm'
+                  copyable={false}
+                />
+              )}
+            </div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side='top' className='max-w-sm'>
+          <div className='space-y-1 text-xs'>
+            <div>
+              {t('Upstream Account')}: {profile.upstream_account || '-'}
+            </div>
+            <div>
+              {t('Upstream Key')}: {profile.key_masked || '-'}
+            </div>
+            <div>
+              {t('Upstream Group')}: {profile.upstream_group || '-'}
+            </div>
+            <div>
+              {t('Upstream Group Ratio')}:{' '}
+              {profile.upstream_group_ratio > 0
+                ? `${profile.upstream_group_ratio.toFixed(4)}x`
+                : '-'}
+            </div>
+            {profile.last_insufficient_at > 0 && (
+              <>
+                <div>
+                  {t('Last insufficient balance')}:{' '}
+                  {formatTimestampToDate(profile.last_insufficient_at)}
+                </div>
+                <div>
+                  {t('Reason:')} {profile.last_insufficient_reason || '-'}
+                </div>
+              </>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 /**
  * Upstream update tags (+N / -N) shown on channel name for model-fetchable channels
  */
@@ -935,6 +1034,21 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
         return groupArray.some((g) => value.includes(g))
       },
       size: 150,
+      enableSorting: false,
+    },
+
+    // Upstream profile column
+    {
+      id: 'upstream_profile',
+      meta: { label: t('Upstream Profile'), mobileHidden: true },
+      header: t('Upstream Profile'),
+      cell: ({ row }) => {
+        if (isTagAggregateRow(row.original)) {
+          return <span className='text-muted-foreground text-xs'>-</span>
+        }
+        return <UpstreamProfileCell channel={row.original as Channel} />
+      },
+      size: 220,
       enableSorting: false,
     },
 

@@ -99,3 +99,17 @@ func ResetModelRatio(c *gin.Context) {
 		"message": "重置模型倍率成功",
 	})
 }
+
+// RefreshPricingCache 手动失效价格缓存并立即重建。
+// 用途：改完 ModelRatio/CompletionRatio/BillingExpr 后不想等 1 分钟 TTL。
+// 权限：仅 root（由路由注册时的中间件保证）。
+func RefreshPricingCache(c *gin.Context) {
+	model.InvalidatePricingCache()
+	// 立刻触发一次重建，方便接口返回时直接看到 count
+	pricing := model.GetPricing()
+	c.JSON(200, gin.H{
+		"success": true,
+		"message": "价格缓存已刷新",
+		"count":   len(pricing),
+	})
+}

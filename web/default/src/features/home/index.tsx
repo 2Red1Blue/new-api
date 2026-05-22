@@ -32,7 +32,10 @@ export function Home() {
 
   if (!isLoaded) {
     return (
-      <PublicLayout showMainContainer={false}>
+      <PublicLayout
+        showMainContainer={false}
+        headerProps={{ forceInverse: true }}
+      >
         <main className='flex min-h-screen items-center justify-center'>
           <div className='text-muted-foreground'>{t('Loading...')}</div>
         </main>
@@ -42,7 +45,11 @@ export function Home() {
 
   if (content) {
     return (
-      <PublicLayout showMainContainer={false} siteName={homeBrand}>
+      <PublicLayout
+        showMainContainer={false}
+        siteName={homeBrand}
+        headerProps={{ forceInverse: true }}
+      >
         <main className='overflow-x-hidden'>
           {isUrl ? (
             <iframe
@@ -66,7 +73,11 @@ export function Home() {
   }
 
   return (
-    <PublicLayout showMainContainer={false} siteName={homeBrand}>
+    <PublicLayout
+      showMainContainer={false}
+      siteName={homeBrand}
+      headerProps={{ forceInverse: true }}
+    >
       <Hero />
       <Footer
         brandName={homeBrand}

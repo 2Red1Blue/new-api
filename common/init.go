@@ -61,6 +61,7 @@ func InitEnv() {
 	} else {
 		CryptoSecret = SessionSecret
 	}
+	UpstreamSecretKey = os.Getenv("UPSTREAM_SECRET_KEY")
 	if os.Getenv("SQLITE_PATH") != "" {
 		SQLitePath = os.Getenv("SQLITE_PATH")
 	}
@@ -80,6 +81,7 @@ func InitEnv() {
 
 	// Initialize variables from constants.go that were using environment variables
 	DebugEnabled = os.Getenv("DEBUG") == "true"
+	LogCallerEnabled = GetEnvOrDefaultBool("LOG_CALLER_ENABLED", false)
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
 	NodeName = os.Getenv("NODE_NAME")

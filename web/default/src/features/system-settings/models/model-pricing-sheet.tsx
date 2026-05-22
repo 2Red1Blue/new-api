@@ -111,7 +111,7 @@ export type ModelRatioData = {
 type ModelPricingSheetProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (data: ModelRatioData) => void
+  onSave: (data: ModelRatioData) => void | Promise<void>
   onCancel?: () => void
   editData?: ModelRatioData | null
   selectedTargetCount?: number
@@ -430,6 +430,7 @@ export function ModelPricingEditorPanel({
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
   const [previewOpen, setPreviewOpen] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const isEditMode = !!editData
 
   const form = useForm<ModelPricingFormValues>({
@@ -684,7 +685,7 @@ export function ModelPricingEditorPanel({
     return nextWarnings
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
-  const handleSubmit = (values: ModelPricingFormValues) => {
+  const handleSubmit = async (values: ModelPricingFormValues) => {
     if (
       pricingMode === 'per-token' &&
       toNumberOrNull(promptPrice) === null &&
@@ -727,12 +728,24 @@ export function ModelPricingEditorPanel({
       data.requestRuleExpr = requestRuleExpr
     }
 
-    onSave(data)
-    form.reset()
-    onCancel?.()
+    setIsSaving(true)
+    try {
+      await onSave(data)
+      form.reset()
+      onCancel?.()
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const activeName = watchedValues.name || editData?.name || t('New model')
+  let submitLabel = t('Add')
+  if (isEditMode) {
+    submitLabel = t('Update')
+  }
+  if (isSaving) {
+    submitLabel = t('Saving...')
+  }
 
   return (
     <div
@@ -958,14 +971,19 @@ export function ModelPricingEditorPanel({
                 ? t('{{count}} selected targets available for bulk copy.', {
                     count: selectedTargetCount,
                   })
-                : t('Changes are written to the settings draft on save.')}
+                : t('Update or add will save this model pricing immediately.')}
             </div>
             <div className='flex justify-end gap-2'>
-              <Button type='button' variant='outline' onClick={onCancel}>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={onCancel}
+                disabled={isSaving}
+              >
                 {t('Cancel')}
               </Button>
-              <Button type='submit'>
-                {isEditMode ? t('Update') : t('Add')}
+              <Button type='submit' disabled={isSaving}>
+                {submitLabel}
               </Button>
             </div>
           </SheetFooter>

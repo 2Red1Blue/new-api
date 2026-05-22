@@ -32,7 +32,10 @@ import {
 } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { ModelRatioVisualEditor } from './model-ratio-visual-editor'
+import {
+  ModelRatioVisualEditor,
+  type ModelRatioVisualDraft,
+} from './model-ratio-visual-editor'
 
 type ModelFormValues = {
   ModelPrice: string
@@ -74,6 +77,22 @@ export const ModelRatioForm = memo(function ModelRatioForm({
       })
     },
     [form]
+  )
+
+  const handleVisualCommit = useCallback(
+    async (draft: ModelRatioVisualDraft) => {
+      const values = {
+        ...form.getValues(),
+        ...draft,
+      }
+
+      Object.entries(draft).forEach(([field, value]) => {
+        handleFieldChange(field as keyof ModelFormValues, value)
+      })
+
+      await onSave(values)
+    },
+    [form, handleFieldChange, onSave]
   )
 
   const toggleEditMode = useCallback(() => {
@@ -121,6 +140,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                   fieldMap[field] || (field as keyof ModelFormValues)
                 handleFieldChange(formField, value)
               }}
+              onCommit={handleVisualCommit}
             />
 
             <FormField

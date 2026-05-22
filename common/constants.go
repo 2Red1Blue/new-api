@@ -74,6 +74,7 @@ var DefaultCollapseSidebar = false // default value of collapse sidebar
 
 var SessionSecret = uuid.New().String()
 var CryptoSecret = uuid.New().String()
+var UpstreamSecretKey = ""
 
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex
@@ -111,6 +112,7 @@ var EmailLoginAuthServerList = []string{
 
 var DebugEnabled bool
 var MemoryCacheEnabled bool
+var LogCallerEnabled bool
 
 var LogConsumeEnabled = true
 

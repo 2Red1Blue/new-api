@@ -78,6 +78,20 @@ type ModelRatioVisualEditorProps = {
   billingMode: string
   billingExpr: string
   onChange: (field: string, value: string) => void
+  onCommit?: (draft: ModelRatioVisualDraft) => Promise<void>
+}
+
+export type ModelRatioVisualDraft = {
+  ModelPrice: string
+  ModelRatio: string
+  CacheRatio: string
+  CreateCacheRatio: string
+  CompletionRatio: string
+  ImageRatio: string
+  AudioRatio: string
+  AudioCompletionRatio: string
+  BillingMode: string
+  BillingExpr: string
 }
 
 type ModelRow = {
@@ -208,6 +222,7 @@ export const ModelRatioVisualEditor = memo(
     billingMode,
     billingExpr,
     onChange,
+    onCommit,
   }: ModelRatioVisualEditorProps) {
     const { t } = useTranslation()
     const isMobile = useMediaQuery('(max-width: 767px)')
@@ -705,7 +720,7 @@ export const ModelRatioVisualEditor = memo(
       },
     })
 
-    const persistPricingData = useCallback(
+    const buildPricingDraft = useCallback(
       (data: ModelRatioData, targetNames: string[] = [data.name]) => {
         const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
           fallback: {},
@@ -804,25 +819,18 @@ export const ModelRatioVisualEditor = memo(
           }
         })
 
-        onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
-        onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
-        onChange('CacheRatio', JSON.stringify(cacheMap, null, 2))
-        onChange('CreateCacheRatio', JSON.stringify(createCacheMap, null, 2))
-        onChange('CompletionRatio', JSON.stringify(completionMap, null, 2))
-        onChange('ImageRatio', JSON.stringify(imageMap, null, 2))
-        onChange('AudioRatio', JSON.stringify(audioMap, null, 2))
-        onChange(
-          'AudioCompletionRatio',
-          JSON.stringify(audioCompletionMap, null, 2)
-        )
-        onChange(
-          'billing_setting.billing_mode',
-          JSON.stringify(billingModeMap, null, 2)
-        )
-        onChange(
-          'billing_setting.billing_expr',
-          JSON.stringify(billingExprMap, null, 2)
-        )
+        return {
+          ModelPrice: JSON.stringify(priceMap, null, 2),
+          ModelRatio: JSON.stringify(ratioMap, null, 2),
+          CacheRatio: JSON.stringify(cacheMap, null, 2),
+          CreateCacheRatio: JSON.stringify(createCacheMap, null, 2),
+          CompletionRatio: JSON.stringify(completionMap, null, 2),
+          ImageRatio: JSON.stringify(imageMap, null, 2),
+          AudioRatio: JSON.stringify(audioMap, null, 2),
+          AudioCompletionRatio: JSON.stringify(audioCompletionMap, null, 2),
+          BillingMode: JSON.stringify(billingModeMap, null, 2),
+          BillingExpr: JSON.stringify(billingExprMap, null, 2),
+        }
       },
       [
         modelPrice,
@@ -835,17 +843,42 @@ export const ModelRatioVisualEditor = memo(
         audioCompletionRatio,
         billingMode,
         billingExpr,
-        onChange,
       ]
     )
 
+    const applyPricingDraft = useCallback(
+      (draft: ModelRatioVisualDraft) => {
+        onChange('ModelPrice', draft.ModelPrice)
+        onChange('ModelRatio', draft.ModelRatio)
+        onChange('CacheRatio', draft.CacheRatio)
+        onChange('CreateCacheRatio', draft.CreateCacheRatio)
+        onChange('CompletionRatio', draft.CompletionRatio)
+        onChange('ImageRatio', draft.ImageRatio)
+        onChange('AudioRatio', draft.AudioRatio)
+        onChange('AudioCompletionRatio', draft.AudioCompletionRatio)
+        onChange('billing_setting.billing_mode', draft.BillingMode)
+        onChange('billing_setting.billing_expr', draft.BillingExpr)
+      },
+      [onChange]
+    )
+
+    const persistPricingData = useCallback(
+      (data: ModelRatioData, targetNames: string[] = [data.name]) => {
+        const draft = buildPricingDraft(data, targetNames)
+        applyPricingDraft(draft)
+        return draft
+      },
+      [applyPricingDraft, buildPricingDraft]
+    )
+
     const handleSave = useCallback(
-      (data: ModelRatioData) => {
-        persistPricingData(data)
+      async (data: ModelRatioData) => {
+        const draft = persistPricingData(data)
+        await onCommit?.(draft)
         setEditData(data)
         setEditorOpen(true)
       },
-      [persistPricingData]
+      [onCommit, persistPricingData]
     )
 
     const handleBatchCopy = useCallback(() => {
@@ -1040,7 +1073,8 @@ export const ModelRatioVisualEditor = memo(
       prevProps.audioCompletionRatio === nextProps.audioCompletionRatio &&
       prevProps.billingMode === nextProps.billingMode &&
       prevProps.billingExpr === nextProps.billingExpr &&
-      prevProps.onChange === nextProps.onChange
+      prevProps.onChange === nextProps.onChange &&
+      prevProps.onCommit === nextProps.onCommit
     )
   }
 )

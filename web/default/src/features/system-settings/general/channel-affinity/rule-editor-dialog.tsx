@@ -77,6 +77,8 @@ interface RuleFormValues {
   value_regex: string
   ttl_seconds: number
   skip_retry_on_failure: boolean
+  break_affinity_on_unavailable: boolean
+  break_affinity_on_rate_limit: boolean
   include_using_group: boolean
   include_model_name: boolean
   include_rule_name: boolean
@@ -121,6 +123,8 @@ export function RuleEditorDialog(props: Props) {
       value_regex: '',
       ttl_seconds: 0,
       skip_retry_on_failure: false,
+      break_affinity_on_unavailable: true,
+      break_affinity_on_rate_limit: false,
       include_using_group: true,
       include_model_name: false,
       include_rule_name: true,
@@ -137,6 +141,9 @@ export function RuleEditorDialog(props: Props) {
       value_regex: r.value_regex || '',
       ttl_seconds: r.ttl_seconds || 0,
       skip_retry_on_failure: !!r.skip_retry_on_failure,
+      break_affinity_on_unavailable:
+        r.break_affinity_on_unavailable ?? true,
+      break_affinity_on_rate_limit: !!r.break_affinity_on_rate_limit,
       include_using_group: r.include_using_group ?? true,
       include_model_name: !!r.include_model_name,
       include_rule_name: r.include_rule_name ?? true,
@@ -165,6 +172,8 @@ export function RuleEditorDialog(props: Props) {
         value_regex: '',
         ttl_seconds: 0,
         skip_retry_on_failure: false,
+        break_affinity_on_unavailable: true,
+        break_affinity_on_rate_limit: false,
         include_using_group: true,
         include_model_name: false,
         include_rule_name: true,
@@ -219,6 +228,8 @@ export function RuleEditorDialog(props: Props) {
       value_regex: values.value_regex.trim(),
       ttl_seconds: Number(values.ttl_seconds || 0),
       skip_retry_on_failure: values.skip_retry_on_failure,
+      break_affinity_on_unavailable: values.break_affinity_on_unavailable,
+      break_affinity_on_rate_limit: values.break_affinity_on_rate_limit,
       include_using_group: values.include_using_group,
       include_model_name: values.include_model_name,
       include_rule_name: values.include_rule_name,
@@ -270,6 +281,47 @@ export function RuleEditorDialog(props: Props) {
               onCheckedChange={(v) => form.setValue('skip_retry_on_failure', v)}
             />
             <Label>{t('Skip retry on failure')}</Label>
+          </div>
+
+          <div className='grid gap-3 rounded-lg border p-4'>
+            <div className='space-y-1'>
+              <Label>{t('Affinity Break Layers')}</Label>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Unavailable errors can break hard affinity; rate limits are controlled separately.'
+                )}
+              </p>
+            </div>
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <div className='flex items-start gap-2'>
+                <Switch
+                  checked={form.watch('break_affinity_on_unavailable')}
+                  onCheckedChange={(v) =>
+                    form.setValue('break_affinity_on_unavailable', v)
+                  }
+                />
+                <div className='space-y-0.5'>
+                  <Label>{t('Break on unavailable')}</Label>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Insufficient balance, disabled channel, and 5xx.')}
+                  </p>
+                </div>
+              </div>
+              <div className='flex items-start gap-2'>
+                <Switch
+                  checked={form.watch('break_affinity_on_rate_limit')}
+                  onCheckedChange={(v) =>
+                    form.setValue('break_affinity_on_rate_limit', v)
+                  }
+                />
+                <div className='space-y-0.5'>
+                  <Label>{t('Break on rate limit')}</Label>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('429 or upstream rate-limit errors.')}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <Separator />

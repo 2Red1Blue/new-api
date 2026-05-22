@@ -37,6 +37,7 @@ import type {
   SearchChannelsParams,
   SearchChannelsResponse,
   TagOperationParams,
+  UpdateChannelRequest,
 } from './types'
 
 // Extended API config types
@@ -134,7 +135,7 @@ export async function createChannel(
  */
 export async function updateChannel(
   id: number,
-  data: Partial<Channel>
+  data: UpdateChannelRequest
 ): Promise<{ success: boolean; message?: string; data?: Channel }> {
   const res = await api.put('/api/channel/', { id, ...data })
   return res.data
@@ -249,6 +250,34 @@ export async function getChannelKey(
 ): Promise<{ success: boolean; message?: string; data?: { key: string } }> {
   const payload = code ? { code } : undefined
   const res = await api.post(`/api/channel/${id}/key`, payload)
+  return res.data
+}
+
+/**
+ * Check whether upstream password encryption is configured.
+ */
+export async function getUpstreamPasswordFeature(): Promise<{
+  success: boolean
+  message?: string
+  data?: { enabled: boolean }
+}> {
+  const res = await api.get('/api/channel/upstream_password/feature')
+  return res.data
+}
+
+/**
+ * Get upstream account password (requires 2FA/Passkey verification).
+ */
+export async function getChannelUpstreamPassword(
+  id: number,
+  code?: string
+): Promise<{
+  success: boolean
+  message?: string
+  data?: { password: string }
+}> {
+  const payload = code ? { code } : undefined
+  const res = await api.post(`/api/channel/${id}/upstream_password`, payload)
   return res.data
 }
 
