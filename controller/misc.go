@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -19,6 +21,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type HealthCheckComponent struct {
+	Status    string `json:"status"`
+	LatencyMs int64  `json:"latency_ms"`
+	Error     string `json:"error,omitempty"`
+	Enabled   bool   `json:"enabled"`
+	Cached    bool   `json:"cached,omitempty"`
+}
+
+type HealthCheckResponse struct {
+	Status     string                          `json:"status"`
+	Timestamp  int64                           `json:"timestamp"`
+	LatencyMs  int64                           `json:"latency_ms"`
+	Version    string                          `json:"version"`
+	NodeType   string                          `json:"node_type"`
+	Components map[string]HealthCheckComponent `json:"components"`
+}
 
 func TestStatus(c *gin.Context) {
 	err := model.PingDB()
@@ -37,6 +56,69 @@ func TestStatus(c *gin.Context) {
 		"http_stats": httpStats,
 	})
 	return
+}
+
+func GetHealthz(c *gin.Context) {
+	start := time.Now()
+	components := map[string]HealthCheckComponent{}
+	overallStatus := "ok"
+
+	dbStart := time.Now()
+	dbErr := model.PingDB()
+	dbComponent := HealthCheckComponent{
+		Enabled:   true,
+		LatencyMs: time.Since(dbStart).Milliseconds(),
+		Cached:    time.Since(dbStart) < 5*time.Millisecond,
+		Status:    "ok",
+	}
+	if dbErr != nil {
+		dbComponent.Status = "error"
+		dbComponent.Error = dbErr.Error()
+		overallStatus = "degraded"
+	}
+	components["db"] = dbComponent
+
+	redisComponent := HealthCheckComponent{
+		Enabled: common.RedisEnabled && common.RDB != nil,
+		Status:  "disabled",
+	}
+	if redisComponent.Enabled {
+		redisStart := time.Now()
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+		_, redisErr := common.RDB.Ping(ctx).Result()
+		redisComponent.LatencyMs = time.Since(redisStart).Milliseconds()
+		redisComponent.Status = "ok"
+		if redisErr != nil {
+			redisComponent.Status = "error"
+			redisComponent.Error = redisErr.Error()
+			overallStatus = "degraded"
+		}
+	}
+	components["redis"] = redisComponent
+
+	nodeType := "master"
+	if !common.IsMasterNode {
+		nodeType = "slave"
+	}
+
+	statusCode := http.StatusOK
+	if overallStatus != "ok" {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	c.JSON(statusCode, gin.H{
+		"success": overallStatus == "ok",
+		"message": overallStatus,
+		"data": HealthCheckResponse{
+			Status:     overallStatus,
+			Timestamp:  time.Now().Unix(),
+			LatencyMs:  time.Since(start).Milliseconds(),
+			Version:    common.Version,
+			NodeType:   nodeType,
+			Components: components,
+		},
+	})
 }
 
 func GetStatus(c *gin.Context) {
