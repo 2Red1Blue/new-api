@@ -92,6 +92,10 @@ export const channelFormSchema = z.object({
   upstream_group_ratio: z.number().optional(),
   upstream_topup_ratio: z.number().optional(),
   upstream_group_ratios: z.string().optional(),
+  auto_priority_enabled: z.boolean().optional(),
+  auto_priority_base: z.number().optional(),
+  auto_priority_min: z.number().optional(),
+  auto_priority_max: z.number().optional(),
   insufficient_balance_keywords: z.string().max(1024).optional(),
   upstream_notify_enabled: z.boolean().optional(),
   clear_upstream_password: z.boolean().optional(),
@@ -161,6 +165,10 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_group_ratio: 0,
   upstream_topup_ratio: 1,
   upstream_group_ratios: '',
+  auto_priority_enabled: true,
+  auto_priority_base: 1,
+  auto_priority_min: 0,
+  auto_priority_max: 100,
   insufficient_balance_keywords: '',
   upstream_notify_enabled: true,
   clear_upstream_password: false,
@@ -305,6 +313,11 @@ export function transformChannelToFormDefaults(
     upstream_group_ratio: channel.upstream_profile?.upstream_group_ratio || 0,
     upstream_topup_ratio: channel.upstream_profile?.upstream_topup_ratio || 1,
     upstream_group_ratios: channel.upstream_profile?.upstream_group_ratios || '',
+    auto_priority_enabled:
+      channel.upstream_profile?.auto_priority_enabled ?? true,
+    auto_priority_base: channel.upstream_profile?.auto_priority_base || 1,
+    auto_priority_min: channel.upstream_profile?.auto_priority_min ?? 0,
+    auto_priority_max: channel.upstream_profile?.auto_priority_max || 100,
     insufficient_balance_keywords:
       channel.upstream_profile?.insufficient_balance_keywords || '',
     upstream_notify_enabled: channel.upstream_profile?.notify_enabled ?? true,
@@ -325,6 +338,10 @@ function buildUpstreamProfilePayload(
     upstream_group_ratio: formData.upstream_group_ratio || 0,
     upstream_topup_ratio: formData.upstream_topup_ratio || 1,
     upstream_group_ratios: formData.upstream_group_ratios?.trim() || '',
+    auto_priority_enabled: formData.auto_priority_enabled ?? true,
+    auto_priority_base: formData.auto_priority_base || 1,
+    auto_priority_min: formData.auto_priority_min ?? 0,
+    auto_priority_max: formData.auto_priority_max || 100,
     insufficient_balance_keywords:
       formData.insufficient_balance_keywords?.trim() || '',
     notify_enabled: formData.upstream_notify_enabled ?? true,
@@ -333,6 +350,9 @@ function buildUpstreamProfilePayload(
   if (includeClearPassword) {
     payload.clear_password = formData.clear_upstream_password === true
   }
+
+  const hasAutoPriorityConfig =
+    typeof payload.auto_priority_enabled === 'boolean'
 
   const hasUsefulValue = Boolean(
     payload.key_label ||
@@ -343,6 +363,10 @@ function buildUpstreamProfilePayload(
       payload.upstream_group_ratio ||
       payload.upstream_topup_ratio !== 1 ||
       payload.upstream_group_ratios ||
+      hasAutoPriorityConfig ||
+      payload.auto_priority_base !== 1 ||
+      payload.auto_priority_min !== 0 ||
+      payload.auto_priority_max !== 100 ||
       payload.insufficient_balance_keywords ||
       payload.notify_enabled === false ||
       payload.clear_password

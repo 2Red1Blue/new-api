@@ -16,17 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { AxiosRequestConfig } from 'axios'
 import { api } from '@/lib/api'
 import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  RunAutoPriorityScanResponse,
   SystemOptionsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
+
+interface ExtendedApiConfig extends AxiosRequestConfig {
+  skipBusinessError?: boolean
+}
 
 export async function getSystemOptions() {
   const res = await api.get<SystemOptionsResponse>('/api/option/')
@@ -56,6 +62,16 @@ export async function deleteLogsBefore(targetTimestamp: number) {
 export async function resetModelRatios() {
   const res = await api.post<UpdateOptionResponse>(
     '/api/option/rest_model_ratio'
+  )
+  return res.data
+}
+
+export async function runAutoPriorityScanOnce() {
+  const config: ExtendedApiConfig = { skipBusinessError: true }
+  const res = await api.post<RunAutoPriorityScanResponse>(
+    '/api/option/channel_auto_priority_scan/run',
+    {},
+    config
   )
   return res.data
 }

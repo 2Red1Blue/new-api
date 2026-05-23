@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -110,6 +111,15 @@ func GetOptions(c *gin.Context) {
 		"message": "",
 		"data":    options,
 	})
+}
+
+func RunChannelAutoPriorityScan(c *gin.Context) {
+	result, err := service.RunChannelAutoPriorityScanOnce()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 type OptionUpdateRequest struct {

@@ -39,6 +39,16 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type RunAutoPriorityScanResponse = {
+  success: boolean
+  message: string
+  data?: {
+    scanned: number
+    applied: number
+    skipped?: boolean
+  }
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -282,6 +292,8 @@ export type OperationsSettings = {
   AutomaticRetryStatusCodes: string
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
+  'monitor_setting.auto_priority_scan_enabled': boolean
+  'monitor_setting.auto_priority_scan_interval_hours': number
   SMTPServer: string
   SMTPPort: string
   SMTPAccount: string

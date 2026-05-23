@@ -3,6 +3,8 @@ package model
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -23,6 +25,13 @@ type ChannelUpstreamProfile struct {
 	UpstreamGroupRatio          float64 `json:"upstream_group_ratio" gorm:"type:decimal(10,4);default:0"`
 	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio" gorm:"type:decimal(10,4);default:1"`
 	UpstreamGroupRatios         string  `json:"upstream_group_ratios" gorm:"type:text"`
+	AutoPriorityEnabled         bool    `json:"auto_priority_enabled" gorm:"default:true"`
+	AutoPriorityBase            int64   `json:"auto_priority_base" gorm:"bigint;default:1"`
+	AutoPriorityMin             int64   `json:"auto_priority_min" gorm:"bigint;default:0"`
+	AutoPriorityMax             int64   `json:"auto_priority_max" gorm:"bigint;default:100"`
+	AutoPriorityValue           int64   `json:"auto_priority_value" gorm:"bigint;default:0"`
+	AutoPriorityUpdatedAt       int64   `json:"auto_priority_updated_at" gorm:"bigint;default:0"`
+	AutoPriorityReason          string  `json:"auto_priority_reason" gorm:"type:varchar(255);default:''"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords" gorm:"type:varchar(1024);default:''"`
 	NotifyEnabled               bool    `json:"notify_enabled" gorm:"default:true"`
 	LastInsufficientAt          int64   `json:"last_insufficient_at" gorm:"bigint"`
@@ -46,6 +55,13 @@ type ChannelUpstreamProfileSummary struct {
 	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio"`
 	UpstreamEffectiveRatio      float64 `json:"upstream_effective_ratio"`
 	UpstreamGroupRatios         string  `json:"upstream_group_ratios"`
+	AutoPriorityEnabled         bool    `json:"auto_priority_enabled"`
+	AutoPriorityBase            int64   `json:"auto_priority_base"`
+	AutoPriorityMin             int64   `json:"auto_priority_min"`
+	AutoPriorityMax             int64   `json:"auto_priority_max"`
+	AutoPriorityValue           int64   `json:"auto_priority_value"`
+	AutoPriorityUpdatedAt       int64   `json:"auto_priority_updated_at"`
+	AutoPriorityReason          string  `json:"auto_priority_reason"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
 	NotifyEnabled               bool    `json:"notify_enabled"`
 	PasswordConfigured          bool    `json:"password_configured"`
@@ -66,6 +82,10 @@ type ChannelUpstreamProfileInput struct {
 	UpstreamGroupRatio          float64 `json:"upstream_group_ratio"`
 	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio"`
 	UpstreamGroupRatios         string  `json:"upstream_group_ratios"`
+	AutoPriorityEnabled         *bool   `json:"auto_priority_enabled"`
+	AutoPriorityBase            int64   `json:"auto_priority_base"`
+	AutoPriorityMin             int64   `json:"auto_priority_min"`
+	AutoPriorityMax             int64   `json:"auto_priority_max"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
 	NotifyEnabled               *bool   `json:"notify_enabled"`
 }
@@ -111,6 +131,13 @@ func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 		UpstreamTopupRatio:          topupRatio,
 		UpstreamEffectiveRatio:      CalculateUpstreamEffectiveRatio(profile.UpstreamGroupRatio, topupRatio),
 		UpstreamGroupRatios:         profile.UpstreamGroupRatios,
+		AutoPriorityEnabled:         profile.AutoPriorityEnabled,
+		AutoPriorityBase:            normalizeAutoPriorityBase(profile.AutoPriorityBase),
+		AutoPriorityMin:             normalizeAutoPriorityMin(profile.AutoPriorityMin),
+		AutoPriorityMax:             normalizeAutoPriorityMax(profile.AutoPriorityMin, profile.AutoPriorityMax),
+		AutoPriorityValue:           profile.AutoPriorityValue,
+		AutoPriorityUpdatedAt:       profile.AutoPriorityUpdatedAt,
+		AutoPriorityReason:          profile.AutoPriorityReason,
 		InsufficientBalanceKeywords: profile.InsufficientBalanceKeywords,
 		NotifyEnabled:               profile.NotifyEnabled,
 		PasswordConfigured:          profile.UpstreamPasswordEnc != "",
@@ -136,6 +163,164 @@ func CalculateUpstreamEffectiveRatio(groupRatio float64, topupRatio float64) flo
 		return 0
 	}
 	return groupRatio / topupRatio
+}
+
+func normalizeAutoPriorityBase(value int64) int64 {
+	if value <= 0 {
+		return 1
+	}
+	return value
+}
+
+func normalizeAutoPriorityMin(value int64) int64 {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func normalizeAutoPriorityMax(minValue int64, maxValue int64) int64 {
+	minValue = normalizeAutoPriorityMin(minValue)
+	if maxValue <= 0 {
+		return 100
+	}
+	if maxValue < minValue {
+		return minValue
+	}
+	return maxValue
+}
+
+func clampInt64(value int64, minValue int64, maxValue int64) int64 {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func CalculateAutoPriorityValue(groupRatio float64, topupRatio float64, base int64, minValue int64, maxValue int64) (int64, string) {
+	effectiveRatio := CalculateUpstreamEffectiveRatio(groupRatio, topupRatio)
+	base = normalizeAutoPriorityBase(base)
+	minValue = normalizeAutoPriorityMin(minValue)
+	maxValue = normalizeAutoPriorityMax(minValue, maxValue)
+	if effectiveRatio <= 0 {
+		return 0, fmt.Sprintf("skip: effective_ratio=0, base=%d, min=%d, max=%d", base, minValue, maxValue)
+	}
+	raw := int64(math.Round(float64(base) / effectiveRatio))
+	value := clampInt64(raw, minValue, maxValue)
+	return value, fmt.Sprintf("cost: er=%.4f, base=%d, raw=%d, priority=%d", effectiveRatio, base, raw, value)
+}
+
+func applyAutoPriority(profile *ChannelUpstreamProfile, now int64) {
+	profile.AutoPriorityBase = normalizeAutoPriorityBase(profile.AutoPriorityBase)
+	profile.AutoPriorityMin = normalizeAutoPriorityMin(profile.AutoPriorityMin)
+	profile.AutoPriorityMax = normalizeAutoPriorityMax(profile.AutoPriorityMin, profile.AutoPriorityMax)
+	if !profile.AutoPriorityEnabled {
+		profile.AutoPriorityValue = 0
+		profile.AutoPriorityUpdatedAt = now
+		profile.AutoPriorityReason = "disabled"
+		return
+	}
+	value, reason := CalculateAutoPriorityValue(
+		profile.UpstreamGroupRatio,
+		profile.UpstreamTopupRatio,
+		profile.AutoPriorityBase,
+		profile.AutoPriorityMin,
+		profile.AutoPriorityMax,
+	)
+	profile.AutoPriorityValue = value
+	profile.AutoPriorityUpdatedAt = now
+	profile.AutoPriorityReason = reason
+}
+
+func ApplyChannelAutoPriority(channelId int, enabled bool, value int64) error {
+	if !enabled || value < 0 {
+		return nil
+	}
+	priority := value
+	if err := DB.Model(&Channel{}).Where("id = ?", channelId).Update("priority", priority).Error; err != nil {
+		return err
+	}
+	if err := DB.Model(&Ability{}).Where("channel_id = ?", channelId).Update("priority", priority).Error; err != nil {
+		return err
+	}
+	if common.MemoryCacheEnabled {
+		channelCache, err := CacheGetChannel(channelId)
+		if err == nil && channelCache != nil {
+			channelCache.Priority = &priority
+			CacheUpdateChannel(channelCache)
+		}
+	}
+	return nil
+}
+
+func shouldApplyAutoPriority(profile *ChannelUpstreamProfile) bool {
+	return profile.AutoPriorityEnabled && !strings.HasPrefix(profile.AutoPriorityReason, "skip:")
+}
+
+func RecalculateChannelUpstreamProfileAutoPriority(profile *ChannelUpstreamProfile, now int64) (bool, error) {
+	if profile == nil {
+		return false, nil
+	}
+	applyAutoPriority(profile, now)
+	if err := DB.Model(&ChannelUpstreamProfile{}).
+		Where("id = ?", profile.Id).
+		Updates(map[string]any{
+			"auto_priority_base":       profile.AutoPriorityBase,
+			"auto_priority_min":        profile.AutoPriorityMin,
+			"auto_priority_max":        profile.AutoPriorityMax,
+			"auto_priority_value":      profile.AutoPriorityValue,
+			"auto_priority_updated_at": profile.AutoPriorityUpdatedAt,
+			"auto_priority_reason":     profile.AutoPriorityReason,
+			"updated_at":               now,
+		}).Error; err != nil {
+		return false, err
+	}
+	if err := ApplyChannelAutoPriority(profile.ChannelId, shouldApplyAutoPriority(profile), profile.AutoPriorityValue); err != nil {
+		return false, err
+	}
+	return shouldApplyAutoPriority(profile), nil
+}
+
+func RecalculateAllChannelAutoPriorities(batchSize int) (int, int, error) {
+	if batchSize <= 0 {
+		batchSize = 200
+	}
+	now := common.GetTimestamp()
+	var scanned int
+	var applied int
+	var lastID int64
+	for {
+		var profiles []ChannelUpstreamProfile
+		err := DB.
+			Where("id > ? AND auto_priority_enabled = ?", lastID, true).
+			Order("id ASC").
+			Limit(batchSize).
+			Find(&profiles).Error
+		if err != nil {
+			return scanned, applied, err
+		}
+		if len(profiles) == 0 {
+			break
+		}
+		for i := range profiles {
+			lastID = profiles[i].Id
+			scanned++
+			ok, err := RecalculateChannelUpstreamProfileAutoPriority(&profiles[i], now)
+			if err != nil {
+				return scanned, applied, err
+			}
+			if ok {
+				applied++
+			}
+		}
+		if len(profiles) < batchSize {
+			break
+		}
+	}
+	return scanned, applied, nil
 }
 
 func GetChannelUpstreamProfileByChannelId(channelId int) (*ChannelUpstreamProfile, error) {
@@ -186,11 +371,15 @@ func UpsertChannelUpstreamProfile(channel *Channel, input ChannelUpstreamProfile
 	err := DB.Where("channel_id = ? AND key_fingerprint = ?", channel.Id, fingerprint).First(profile).Error
 	if err != nil {
 		profile = &ChannelUpstreamProfile{
-			ChannelId:      channel.Id,
-			KeyFingerprint: fingerprint,
-			KeyMasked:      MaskKey(key),
-			NotifyEnabled:  true,
-			CreatedAt:      now,
+			ChannelId:           channel.Id,
+			KeyFingerprint:      fingerprint,
+			KeyMasked:           MaskKey(key),
+			NotifyEnabled:       true,
+			AutoPriorityEnabled: true,
+			AutoPriorityBase:    1,
+			AutoPriorityMin:     0,
+			AutoPriorityMax:     100,
+			CreatedAt:           now,
 		}
 	}
 	profile.KeyLabel = strings.TrimSpace(input.KeyLabel)
@@ -204,15 +393,33 @@ func UpsertChannelUpstreamProfile(channel *Channel, input ChannelUpstreamProfile
 	profile.UpstreamGroupRatio = input.UpstreamGroupRatio
 	profile.UpstreamTopupRatio = normalizeUpstreamTopupRatio(input.UpstreamTopupRatio)
 	profile.UpstreamGroupRatios = strings.TrimSpace(input.UpstreamGroupRatios)
+	if input.AutoPriorityEnabled != nil {
+		profile.AutoPriorityEnabled = *input.AutoPriorityEnabled
+	}
+	if input.AutoPriorityBase > 0 {
+		profile.AutoPriorityBase = input.AutoPriorityBase
+	}
+	if input.AutoPriorityMin >= 0 {
+		profile.AutoPriorityMin = input.AutoPriorityMin
+	}
+	if input.AutoPriorityMax > 0 {
+		profile.AutoPriorityMax = input.AutoPriorityMax
+	}
+	applyAutoPriority(profile, now)
 	profile.InsufficientBalanceKeywords = strings.TrimSpace(input.InsufficientBalanceKeywords)
 	if input.NotifyEnabled != nil {
 		profile.NotifyEnabled = *input.NotifyEnabled
 	}
 	profile.UpdatedAt = now
 	if profile.Id == 0 {
-		return profile, DB.Create(profile).Error
+		err = DB.Create(profile).Error
+	} else {
+		err = DB.Save(profile).Error
 	}
-	return profile, DB.Save(profile).Error
+	if err != nil {
+		return profile, err
+	}
+	return profile, ApplyChannelAutoPriority(channel.Id, shouldApplyAutoPriority(profile), profile.AutoPriorityValue)
 }
 
 func UpdateChannelUpstreamProfile(channelId int, input ChannelUpstreamProfilePatch, passwordEnc string) (*ChannelUpstreamProfile, error) {
@@ -238,12 +445,28 @@ func UpdateChannelUpstreamProfile(channelId int, input ChannelUpstreamProfilePat
 	profile.UpstreamGroupRatio = input.UpstreamGroupRatio
 	profile.UpstreamTopupRatio = normalizeUpstreamTopupRatio(input.UpstreamTopupRatio)
 	profile.UpstreamGroupRatios = strings.TrimSpace(input.UpstreamGroupRatios)
+	if input.AutoPriorityEnabled != nil {
+		profile.AutoPriorityEnabled = *input.AutoPriorityEnabled
+	}
+	if input.AutoPriorityBase > 0 {
+		profile.AutoPriorityBase = input.AutoPriorityBase
+	}
+	if input.AutoPriorityMin >= 0 {
+		profile.AutoPriorityMin = input.AutoPriorityMin
+	}
+	if input.AutoPriorityMax > 0 {
+		profile.AutoPriorityMax = input.AutoPriorityMax
+	}
 	profile.InsufficientBalanceKeywords = strings.TrimSpace(input.InsufficientBalanceKeywords)
 	if input.NotifyEnabled != nil {
 		profile.NotifyEnabled = *input.NotifyEnabled
 	}
 	profile.UpdatedAt = common.GetTimestamp()
-	return profile, DB.Save(profile).Error
+	applyAutoPriority(profile, profile.UpdatedAt)
+	if err := DB.Save(profile).Error; err != nil {
+		return profile, err
+	}
+	return profile, ApplyChannelAutoPriority(channelId, shouldApplyAutoPriority(profile), profile.AutoPriorityValue)
 }
 
 func DeleteChannelUpstreamProfile(channelId int) error {

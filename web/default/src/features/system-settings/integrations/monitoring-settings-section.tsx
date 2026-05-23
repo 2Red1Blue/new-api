@@ -18,10 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useRef } from 'react'
 import * as z from 'zod'
+import { useMutation } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,6 +39,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsSection } from '../components/settings-section'
+import { runAutoPriorityScanOnce } from '../api'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -61,6 +64,10 @@ const monitoringSchema = z
         .number()
         .int()
         .min(1, 'Interval must be at least 1 minute'),
+      auto_priority_scan_enabled: z.boolean(),
+      auto_priority_scan_interval_hours: z.coerce
+        .number()
+        .min(0.1, 'Interval must be at least 0.1 hour'),
     }),
   })
   .superRefine((values, ctx) => {
@@ -105,6 +112,8 @@ type MonitoringSettingsSectionProps = {
     AutomaticRetryStatusCodes: string
     'monitor_setting.auto_test_channel_enabled': boolean
     'monitor_setting.auto_test_channel_minutes': number
+    'monitor_setting.auto_priority_scan_enabled': boolean
+    'monitor_setting.auto_priority_scan_interval_hours': number
   }
 }
 
@@ -122,6 +131,8 @@ type NormalizedMonitoringValues = {
   AutomaticRetryStatusCodes: string
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
+  'monitor_setting.auto_priority_scan_enabled': boolean
+  'monitor_setting.auto_priority_scan_interval_hours': number
 }
 
 const buildFormDefaults = (
@@ -141,6 +152,10 @@ const buildFormDefaults = (
       defaults['monitor_setting.auto_test_channel_enabled'],
     auto_test_channel_minutes:
       defaults['monitor_setting.auto_test_channel_minutes'],
+    auto_priority_scan_enabled:
+      defaults['monitor_setting.auto_priority_scan_enabled'],
+    auto_priority_scan_interval_hours:
+      defaults['monitor_setting.auto_priority_scan_interval_hours'],
   },
 })
 
@@ -164,6 +179,10 @@ const normalizeDefaults = (
     defaults['monitor_setting.auto_test_channel_enabled'],
   'monitor_setting.auto_test_channel_minutes':
     defaults['monitor_setting.auto_test_channel_minutes'],
+  'monitor_setting.auto_priority_scan_enabled':
+    defaults['monitor_setting.auto_priority_scan_enabled'],
+  'monitor_setting.auto_priority_scan_interval_hours':
+    defaults['monitor_setting.auto_priority_scan_interval_hours'],
 })
 
 const normalizeFormValues = (
@@ -186,6 +205,10 @@ const normalizeFormValues = (
     values.monitor_setting.auto_test_channel_enabled,
   'monitor_setting.auto_test_channel_minutes':
     values.monitor_setting.auto_test_channel_minutes,
+  'monitor_setting.auto_priority_scan_enabled':
+    values.monitor_setting.auto_priority_scan_enabled,
+  'monitor_setting.auto_priority_scan_interval_hours':
+    values.monitor_setting.auto_priority_scan_interval_hours,
 })
 
 export function MonitoringSettingsSection({
@@ -205,6 +228,29 @@ export function MonitoringSettingsSection({
   const form = useForm<MonitoringFormInput, unknown, MonitoringFormValues>({
     resolver: zodResolver(monitoringSchema),
     defaultValues: formDefaults,
+  })
+
+  const runAutoPriorityScan = useMutation({
+    mutationFn: runAutoPriorityScanOnce,
+    onSuccess: (response) => {
+      if (!response.success) {
+        toast.error(response.message || t('Failed to run auto priority scan'))
+        return
+      }
+      if (response.data?.skipped) {
+        toast.info(t('Auto priority scan is already running'))
+        return
+      }
+      toast.success(
+        t('Auto priority scan finished: scanned {{scanned}}, applied {{applied}}', {
+          scanned: response.data?.scanned ?? 0,
+          applied: response.data?.applied ?? 0,
+        })
+      )
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || t('Failed to run auto priority scan'))
+    },
   })
 
   useResetForm(form, formDefaults)
@@ -277,6 +323,49 @@ export function MonitoringSettingsSection({
 
             <FormField
               control={form.control}
+              name='monitor_setting.auto_priority_scan_enabled'
+              render={({ field }) => (
+                <FormItem className='flex flex-row items-center justify-between gap-4 rounded-lg border p-4'>
+                  <div className='space-y-0.5'>
+                    <FormLabel className='text-base'>
+                      {t('Background auto priority scan')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Periodically scan channels that have cost-first auto priority enabled'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <div className='flex shrink-0 items-center gap-2'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      disabled={runAutoPriorityScan.isPending}
+                      onClick={() => runAutoPriorityScan.mutate()}
+                    >
+                      {runAutoPriorityScan.isPending ? (
+                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                      ) : (
+                        <RefreshCw className='h-3.5 w-3.5' />
+                      )}
+                      {t('Run once')}
+                    </Button>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </div>
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <div className='grid gap-6 md:grid-cols-2'>
+            <FormField
+              control={form.control}
               name='monitor_setting.auto_test_channel_minutes'
               render={({ field }) => (
                 <FormItem>
@@ -302,6 +391,41 @@ export function MonitoringSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t('How frequently the system tests all channels')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='monitor_setting.auto_priority_scan_interval_hours'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Background scan interval (hours)')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0.1}
+                      step={0.1}
+                      value={
+                        typeof field.value === 'number' &&
+                        Number.isFinite(field.value)
+                          ? field.value
+                          : ''
+                      }
+                      onChange={(event) =>
+                        field.onChange(event.target.valueAsNumber)
+                      }
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Shared interval for refreshing enabled channel auto priorities'
+                    )}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

@@ -1318,6 +1318,9 @@ func UpdateChannel(c *gin.Context) {
 			}
 		}
 	}
+	if refreshedChannel, err := model.GetChannelById(channel.Id, false); err == nil {
+		channel.Channel.Priority = refreshedChannel.Priority
+	}
 	model.InitChannelCache()
 	service.ResetProxyClientCache()
 	channel.Key = ""

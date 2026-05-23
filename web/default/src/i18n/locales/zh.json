@@ -4617,6 +4617,24 @@
     "Save the channel before fetching upstream ratios": "请先保存渠道后再获取上游倍率",
     "No matching upstream group ratio found": "未找到匹配的上游分组倍率",
     "Fetch ratios from upstream and match this group to update the ratio field.": "从上游获取倍率，并按当前分组匹配后更新右侧倍率字段。",
-    "Effective": "最终"
+    "Effective": "最终",
+    "Cost-first Auto Priority": "成本优先自动优先级",
+    "When enabled, saving recalculates the channel priority from the effective upstream ratio.": "开启后，保存渠道时会根据最终上游倍率重新计算并写入渠道优先级。",
+    "Auto Priority Base": "自动优先级基准",
+    "Auto Priority Min": "自动优先级下限",
+    "Auto Priority Max": "自动优先级上限",
+    "Preview Priority": "预览优先级",
+    "Formula: round(base / effective ratio), then clamp to min and max.": "公式：round(基准 / 最终倍率)，再限制在上下限范围内。",
+    "Auto Priority": "自动优先级",
+    "Last calculation": "上次计算",
+    "Background auto priority scan": "后台定时扫描",
+    "Periodically scan channels that have cost-first auto priority enabled": "定期扫描渠道中已开启成本优先自动优先级的配置",
+    "Background scan interval (hours)": "后台扫描周期（小时）",
+    "Shared interval for refreshing enabled channel auto priorities": "所有已开启自动优先级的渠道共用这个刷新周期",
+    "Run once": "立即执行一次",
+    "Auto priority scan finished: scanned {{scanned}}, applied {{applied}}": "自动优先级扫描完成：扫描 {{scanned}} 个，应用 {{applied}} 个",
+    "Failed to run auto priority scan": "执行自动优先级扫描失败",
+    "Auto priority scan is already running": "自动优先级扫描正在执行中",
+    "Disabled": "已关闭"
   }
 }

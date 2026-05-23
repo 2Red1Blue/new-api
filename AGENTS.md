@@ -13,6 +13,11 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - **Auth**: JWT, WebAuthn/Passkeys, OAuth (GitHub, Discord, OIDC, etc.)
 - **Frontend package manager**: Bun (preferred over npm/yarn/pnpm)
 
+## Local Development
+
+- Local run/debug notes are maintained in `docs/local-development.md`.
+- For GoLand debug logging, use `DEBUG=true`; `LOG_LEVEL=debug` is not wired to the application logger.
+
 ## Architecture
 
 Layered architecture: Router -> Controller -> Service -> Model

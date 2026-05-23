@@ -196,6 +196,14 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
                   copyable={false}
                 />
               )}
+              {profile.auto_priority_enabled && profile.auto_priority_value >= 0 && (
+                <StatusBadge
+                  label={`${t('Auto Priority')} ${profile.auto_priority_value}`}
+                  variant='purple'
+                  size='sm'
+                  copyable={false}
+                />
+              )}
               {hasInsufficientState && (
                 <StatusBadge
                   label={t('Low balance')}
@@ -234,6 +242,17 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
               {t('Effective Upstream Ratio')}:{' '}
               {effectiveRatio > 0 ? `${effectiveRatio.toFixed(4)}x` : '-'}
             </div>
+            <div>
+              {t('Auto Priority')}:&nbsp;
+              {profile.auto_priority_enabled
+                ? profile.auto_priority_value
+                : t('Disabled')}
+            </div>
+            {profile.auto_priority_reason && (
+              <div>
+                {t('Last calculation')}: {profile.auto_priority_reason}
+              </div>
+            )}
             {profile.last_insufficient_at > 0 && (
               <>
                 <div>

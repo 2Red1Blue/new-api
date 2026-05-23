@@ -4617,6 +4617,24 @@
     "Save the channel before fetching upstream ratios": "Save the channel before fetching upstream ratios",
     "No matching upstream group ratio found": "No matching upstream group ratio found",
     "Fetch ratios from upstream and match this group to update the ratio field.": "Fetch ratios from upstream and match this group to update the ratio field.",
-    "Effective": "Effective"
+    "Effective": "Effective",
+    "Cost-first Auto Priority": "Cost-first Auto Priority",
+    "When enabled, saving recalculates the channel priority from the effective upstream ratio.": "When enabled, saving recalculates the channel priority from the effective upstream ratio.",
+    "Auto Priority Base": "Auto Priority Base",
+    "Auto Priority Min": "Auto Priority Min",
+    "Auto Priority Max": "Auto Priority Max",
+    "Preview Priority": "Preview Priority",
+    "Formula: round(base / effective ratio), then clamp to min and max.": "Formula: round(base / effective ratio), then clamp to min and max.",
+    "Auto Priority": "Auto Priority",
+    "Last calculation": "Last calculation",
+    "Background auto priority scan": "Background auto priority scan",
+    "Periodically scan channels that have cost-first auto priority enabled": "Periodically scan channels that have cost-first auto priority enabled",
+    "Background scan interval (hours)": "Background scan interval (hours)",
+    "Shared interval for refreshing enabled channel auto priorities": "Shared interval for refreshing enabled channel auto priorities",
+    "Run once": "Run once",
+    "Auto priority scan finished: scanned {{scanned}}, applied {{applied}}": "Auto priority scan finished: scanned {{scanned}}, applied {{applied}}",
+    "Failed to run auto priority scan": "Failed to run auto priority scan",
+    "Auto priority scan is already running": "Auto priority scan is already running",
+    "Disabled": "Disabled"
   }
 }

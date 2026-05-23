@@ -271,6 +271,16 @@ function formatUnixTime(timestamp: unknown): string {
   return new Date(seconds * 1000).toLocaleString()
 }
 
+function normalizeNumberInput(
+  value: unknown,
+  fallback: number,
+  min: number
+): number {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(numeric, min)
+}
+
 function CardHeading({ title, icon }: { title: string; icon?: ReactNode }) {
   return (
     <div className='flex items-center gap-2.5'>
@@ -424,6 +434,31 @@ export function ChannelMutateDrawer({
   const upstreamEffectiveRatio =
     upstreamGroupRatio > 0 && upstreamTopupRatio > 0
       ? upstreamGroupRatio / upstreamTopupRatio
+      : 0
+  const autoPriorityEnabled = form.watch('auto_priority_enabled') ?? true
+  const autoPriorityBase = normalizeNumberInput(
+    form.watch('auto_priority_base'),
+    1,
+    1
+  )
+  const autoPriorityMin = normalizeNumberInput(
+    form.watch('auto_priority_min'),
+    0,
+    0
+  )
+  const autoPriorityMax = Math.max(
+    normalizeNumberInput(form.watch('auto_priority_max'), 100, 1),
+    autoPriorityMin
+  )
+  const previewAutoPriority =
+    autoPriorityEnabled && upstreamEffectiveRatio > 0
+      ? Math.min(
+          Math.max(
+            Math.round(autoPriorityBase / upstreamEffectiveRatio),
+            autoPriorityMin
+          ),
+          autoPriorityMax
+        )
       : 0
   const currentSettings = form.watch('settings')
   const {
@@ -2454,6 +2489,120 @@ export function ChannelMutateDrawer({
                   </AlertDescription>
                 </Alert>
 
+                <div className='space-y-4 rounded-lg border p-4'>
+                  <div className='grid gap-4 sm:grid-cols-3'>
+                    <FormField
+                      control={form.control}
+                      name='auto_priority_base'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Auto Priority Base')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min='1'
+                              placeholder='1'
+                              value={field.value ?? 1}
+                              onChange={(event) =>
+                                field.onChange(
+                                  normalizeNumberInput(
+                                    event.target.value,
+                                    1,
+                                    1
+                                  )
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='auto_priority_min'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Auto Priority Min')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min='0'
+                              placeholder='0'
+                              value={field.value ?? 0}
+                              onChange={(event) =>
+                                field.onChange(
+                                  normalizeNumberInput(
+                                    event.target.value,
+                                    0,
+                                    0
+                                  )
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='auto_priority_max'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Auto Priority Max')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min='1'
+                              placeholder='100'
+                              value={field.value ?? 100}
+                              onChange={(event) =>
+                                field.onChange(
+                                  normalizeNumberInput(
+                                    event.target.value,
+                                    100,
+                                    1
+                                  )
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <Alert>
+                    <AlertDescription className='flex flex-col gap-1 text-xs sm:flex-row sm:items-center sm:justify-between'>
+                      <span>
+                        {t('Preview Priority')}:{' '}
+                        <span className='font-semibold'>
+                          {previewAutoPriority > 0 ? previewAutoPriority : '-'}
+                        </span>
+                      </span>
+                      <span>
+                        {t(
+                          'Formula: round(base / effective ratio), then clamp to min and max.'
+                        )}
+                      </span>
+                    </AlertDescription>
+                  </Alert>
+
+                  {isEditing &&
+                    channelData?.data?.upstream_profile
+                      ?.auto_priority_reason && (
+                      <p className='text-muted-foreground text-xs'>
+                        {t('Last calculation')}:&nbsp;
+                        {
+                          channelData.data.upstream_profile
+                            .auto_priority_reason
+                        }
+                      </p>
+                    )}
+                </div>
+
                 <FormField
                   control={form.control}
                   name='upstream_key_label'
@@ -3055,6 +3204,34 @@ export function ChannelMutateDrawer({
                           )}
                         />
                       </div>
+
+                      <FormField
+                        control={form.control}
+                        name='auto_priority_enabled'
+                        render={({ field }) => (
+                          <FormItem className='rounded-lg border p-4'>
+                            <div className='flex items-center justify-between gap-4'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Cost-first Auto Priority')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'When enabled, saving recalculates the channel priority from the effective upstream ratio.'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value ?? true}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </div>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
                       <FormField
                         control={form.control}

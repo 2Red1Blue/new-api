@@ -47,6 +47,13 @@ export const channelUpstreamProfileSchema = z.object({
   upstream_topup_ratio: z.number().default(1),
   upstream_effective_ratio: z.number().default(0),
   upstream_group_ratios: z.string().default(''),
+  auto_priority_enabled: z.boolean().default(true),
+  auto_priority_base: z.number().default(1),
+  auto_priority_min: z.number().default(0),
+  auto_priority_max: z.number().default(100),
+  auto_priority_value: z.number().default(0),
+  auto_priority_updated_at: z.number().default(0),
+  auto_priority_reason: z.string().default(''),
   insufficient_balance_keywords: z.string().default(''),
   notify_enabled: z.boolean().default(true),
   password_configured: z.boolean().default(false),
@@ -363,6 +370,10 @@ export interface ChannelUpstreamProfilePayload {
   upstream_group_ratio?: number
   upstream_topup_ratio?: number
   upstream_group_ratios?: string
+  auto_priority_enabled?: boolean
+  auto_priority_base?: number
+  auto_priority_min?: number
+  auto_priority_max?: number
   insufficient_balance_keywords?: string
   notify_enabled?: boolean
   clear_password?: boolean
