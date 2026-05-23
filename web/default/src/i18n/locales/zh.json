@@ -4605,6 +4605,18 @@
     "Unavailable": "不可用",
     "Upstream RPM Limit": "上游 RPM 限制",
     "Empty or 0 means unlimited": "为空或 0 表示不限制",
-    "Maximum requests per minute for this upstream channel.": "该上游渠道每分钟最多转发的请求数。"
+    "Maximum requests per minute for this upstream channel.": "该上游渠道每分钟最多转发的请求数。",
+    "Upstream Top-up Ratio": "上游充值倍率",
+    "How many USD-equivalent upstream credits 1 CNY buys. Empty or 0 means 1.": "1 元人民币可购买多少上游美元等值额度。为空或 0 表示 1。",
+    "Effective Upstream Ratio": "最终上游倍率",
+    "Calculated as upstream group ratio / upstream top-up ratio.": "按 上游分组倍率 / 上游充值倍率 计算。",
+    "Fetch upstream ratios": "获取上游倍率",
+    "Upstream ratios fetched": "已获取上游倍率",
+    "Upstream ratios fetched with notes": "已获取上游倍率，部分信息需手动确认",
+    "Failed to fetch upstream ratios": "获取上游倍率失败",
+    "Save the channel before fetching upstream ratios": "请先保存渠道后再获取上游倍率",
+    "No matching upstream group ratio found": "未找到匹配的上游分组倍率",
+    "Fetch ratios from upstream and match this group to update the ratio field.": "从上游获取倍率，并按当前分组匹配后更新右侧倍率字段。",
+    "Effective": "最终"
   }
 }

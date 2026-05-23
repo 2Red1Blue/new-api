@@ -232,6 +232,8 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/models", controller.ChannelListModels)
 			channelRoute.GET("/models_enabled", controller.EnabledListModels)
 			channelRoute.GET("/upstream_password/feature", middleware.RootAuth(), controller.GetUpstreamPasswordFeature)
+			channelRoute.POST("/upstream_group_ratios", controller.PreviewChannelUpstreamGroupRatios)
+			channelRoute.GET("/:id/upstream_group_ratios", controller.FetchChannelUpstreamGroupRatios)
 			channelRoute.GET("/:id", controller.GetChannel)
 			channelRoute.POST("/:id/key", middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.SecureVerificationRequired(), controller.GetChannelKey)
 			channelRoute.POST("/:id/upstream_password", middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.SecureVerificationRequired(), controller.GetChannelUpstreamPassword)

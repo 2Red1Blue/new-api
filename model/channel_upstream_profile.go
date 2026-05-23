@@ -21,6 +21,7 @@ type ChannelUpstreamProfile struct {
 	UpstreamLoginUrl            string  `json:"upstream_login_url" gorm:"type:varchar(512);default:''"`
 	UpstreamGroup               string  `json:"upstream_group" gorm:"type:varchar(128);default:''"`
 	UpstreamGroupRatio          float64 `json:"upstream_group_ratio" gorm:"type:decimal(10,4);default:0"`
+	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio" gorm:"type:decimal(10,4);default:1"`
 	UpstreamGroupRatios         string  `json:"upstream_group_ratios" gorm:"type:text"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords" gorm:"type:varchar(1024);default:''"`
 	NotifyEnabled               bool    `json:"notify_enabled" gorm:"default:true"`
@@ -42,6 +43,8 @@ type ChannelUpstreamProfileSummary struct {
 	UpstreamLoginUrl            string  `json:"upstream_login_url"`
 	UpstreamGroup               string  `json:"upstream_group"`
 	UpstreamGroupRatio          float64 `json:"upstream_group_ratio"`
+	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio"`
+	UpstreamEffectiveRatio      float64 `json:"upstream_effective_ratio"`
 	UpstreamGroupRatios         string  `json:"upstream_group_ratios"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
 	NotifyEnabled               bool    `json:"notify_enabled"`
@@ -61,6 +64,7 @@ type ChannelUpstreamProfileInput struct {
 	UpstreamLoginUrl            string  `json:"upstream_login_url"`
 	UpstreamGroup               string  `json:"upstream_group"`
 	UpstreamGroupRatio          float64 `json:"upstream_group_ratio"`
+	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio"`
 	UpstreamGroupRatios         string  `json:"upstream_group_ratios"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
 	NotifyEnabled               *bool   `json:"notify_enabled"`
@@ -93,6 +97,7 @@ func primaryChannelKey(raw string) string {
 }
 
 func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
+	topupRatio := normalizeUpstreamTopupRatio(profile.UpstreamTopupRatio)
 	return ChannelUpstreamProfileSummary{
 		Id:                          profile.Id,
 		ChannelId:                   profile.ChannelId,
@@ -103,6 +108,8 @@ func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 		UpstreamLoginUrl:            profile.UpstreamLoginUrl,
 		UpstreamGroup:               profile.UpstreamGroup,
 		UpstreamGroupRatio:          profile.UpstreamGroupRatio,
+		UpstreamTopupRatio:          topupRatio,
+		UpstreamEffectiveRatio:      CalculateUpstreamEffectiveRatio(profile.UpstreamGroupRatio, topupRatio),
 		UpstreamGroupRatios:         profile.UpstreamGroupRatios,
 		InsufficientBalanceKeywords: profile.InsufficientBalanceKeywords,
 		NotifyEnabled:               profile.NotifyEnabled,
@@ -114,6 +121,21 @@ func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 		CreatedAt:                   profile.CreatedAt,
 		UpdatedAt:                   profile.UpdatedAt,
 	}
+}
+
+func normalizeUpstreamTopupRatio(ratio float64) float64 {
+	if ratio <= 0 {
+		return 1
+	}
+	return ratio
+}
+
+func CalculateUpstreamEffectiveRatio(groupRatio float64, topupRatio float64) float64 {
+	topupRatio = normalizeUpstreamTopupRatio(topupRatio)
+	if groupRatio <= 0 {
+		return 0
+	}
+	return groupRatio / topupRatio
 }
 
 func GetChannelUpstreamProfileByChannelId(channelId int) (*ChannelUpstreamProfile, error) {
@@ -180,6 +202,7 @@ func UpsertChannelUpstreamProfile(channel *Channel, input ChannelUpstreamProfile
 	profile.UpstreamLoginUrl = strings.TrimSpace(input.UpstreamLoginUrl)
 	profile.UpstreamGroup = strings.TrimSpace(input.UpstreamGroup)
 	profile.UpstreamGroupRatio = input.UpstreamGroupRatio
+	profile.UpstreamTopupRatio = normalizeUpstreamTopupRatio(input.UpstreamTopupRatio)
 	profile.UpstreamGroupRatios = strings.TrimSpace(input.UpstreamGroupRatios)
 	profile.InsufficientBalanceKeywords = strings.TrimSpace(input.InsufficientBalanceKeywords)
 	if input.NotifyEnabled != nil {
@@ -213,6 +236,7 @@ func UpdateChannelUpstreamProfile(channelId int, input ChannelUpstreamProfilePat
 	profile.UpstreamLoginUrl = strings.TrimSpace(input.UpstreamLoginUrl)
 	profile.UpstreamGroup = strings.TrimSpace(input.UpstreamGroup)
 	profile.UpstreamGroupRatio = input.UpstreamGroupRatio
+	profile.UpstreamTopupRatio = normalizeUpstreamTopupRatio(input.UpstreamTopupRatio)
 	profile.UpstreamGroupRatios = strings.TrimSpace(input.UpstreamGroupRatios)
 	profile.InsufficientBalanceKeywords = strings.TrimSpace(input.InsufficientBalanceKeywords)
 	if input.NotifyEnabled != nil {

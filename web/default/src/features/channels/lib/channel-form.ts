@@ -90,6 +90,7 @@ export const channelFormSchema = z.object({
   upstream_login_url: z.string().optional(),
   upstream_group: z.string().optional(),
   upstream_group_ratio: z.number().optional(),
+  upstream_topup_ratio: z.number().optional(),
   upstream_group_ratios: z.string().optional(),
   insufficient_balance_keywords: z.string().max(1024).optional(),
   upstream_notify_enabled: z.boolean().optional(),
@@ -158,6 +159,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   upstream_login_url: '',
   upstream_group: '',
   upstream_group_ratio: 0,
+  upstream_topup_ratio: 1,
   upstream_group_ratios: '',
   insufficient_balance_keywords: '',
   upstream_notify_enabled: true,
@@ -301,6 +303,7 @@ export function transformChannelToFormDefaults(
     upstream_login_url: channel.upstream_profile?.upstream_login_url || '',
     upstream_group: channel.upstream_profile?.upstream_group || '',
     upstream_group_ratio: channel.upstream_profile?.upstream_group_ratio || 0,
+    upstream_topup_ratio: channel.upstream_profile?.upstream_topup_ratio || 1,
     upstream_group_ratios: channel.upstream_profile?.upstream_group_ratios || '',
     insufficient_balance_keywords:
       channel.upstream_profile?.insufficient_balance_keywords || '',
@@ -320,6 +323,7 @@ function buildUpstreamProfilePayload(
     upstream_login_url: formData.upstream_login_url?.trim() || '',
     upstream_group: formData.upstream_group?.trim() || '',
     upstream_group_ratio: formData.upstream_group_ratio || 0,
+    upstream_topup_ratio: formData.upstream_topup_ratio || 1,
     upstream_group_ratios: formData.upstream_group_ratios?.trim() || '',
     insufficient_balance_keywords:
       formData.insufficient_balance_keywords?.trim() || '',
@@ -337,6 +341,7 @@ function buildUpstreamProfilePayload(
       payload.upstream_login_url ||
       payload.upstream_group ||
       payload.upstream_group_ratio ||
+      payload.upstream_topup_ratio !== 1 ||
       payload.upstream_group_ratios ||
       payload.insufficient_balance_keywords ||
       payload.notify_enabled === false ||

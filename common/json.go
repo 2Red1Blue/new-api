@@ -22,6 +22,10 @@ func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
+func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
+	return json.MarshalIndent(v, prefix, indent)
+}
+
 func GetJsonType(data json.RawMessage) string {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 {

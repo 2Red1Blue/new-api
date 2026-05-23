@@ -517,6 +517,20 @@ export const STATIC_I18N_KEYS = [
   'Batch detection failed',
   'Batch detection complete: {{channels}} channels, {{add}} to add, {{remove}} to remove, {{fails}} failed',
 
+  // Channel upstream profile
+  'Upstream Top-up Ratio',
+  'How many USD-equivalent upstream credits 1 CNY buys. Empty or 0 means 1.',
+  'Effective Upstream Ratio',
+  'Calculated as upstream group ratio / upstream top-up ratio.',
+  'Fetch upstream ratios',
+  'Upstream ratios fetched',
+  'Upstream ratios fetched with notes',
+  'Failed to fetch upstream ratios',
+  'Save the channel before fetching upstream ratios',
+  'No matching upstream group ratio found',
+  'Fetch ratios from upstream and match this group to update the ratio field.',
+  'Effective',
+
   // Misc
   'Cancel',
   'Status',

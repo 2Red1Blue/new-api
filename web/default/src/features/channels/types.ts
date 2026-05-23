@@ -44,6 +44,8 @@ export const channelUpstreamProfileSchema = z.object({
   upstream_login_url: z.string().default(''),
   upstream_group: z.string().default(''),
   upstream_group_ratio: z.number().default(0),
+  upstream_topup_ratio: z.number().default(1),
+  upstream_effective_ratio: z.number().default(0),
   upstream_group_ratios: z.string().default(''),
   insufficient_balance_keywords: z.string().default(''),
   notify_enabled: z.boolean().default(true),
@@ -359,10 +361,29 @@ export interface ChannelUpstreamProfilePayload {
   upstream_login_url?: string
   upstream_group?: string
   upstream_group_ratio?: number
+  upstream_topup_ratio?: number
   upstream_group_ratios?: string
   insufficient_balance_keywords?: string
   notify_enabled?: boolean
   clear_password?: boolean
+}
+
+export interface FetchUpstreamGroupRatiosResponse {
+  success: boolean
+  message?: string
+  data?: {
+    group_ratios: Record<string, number>
+    group_ratios_raw: string
+    topup_ratio: number
+    source: string
+    message?: string
+  }
+}
+
+export interface FetchUpstreamGroupRatiosPreviewParams {
+  base_url: string
+  type: number
+  key: string
 }
 
 export type UpdateChannelRequest = Omit<Partial<Channel>, 'upstream_profile'> & {

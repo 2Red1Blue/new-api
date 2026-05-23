@@ -108,6 +108,7 @@ import {
 import {
   createChannel,
   fetchModels,
+  fetchUpstreamGroupRatios,
   getAllModels,
   getChannel,
   getChannelKey,
@@ -115,6 +116,7 @@ import {
   getGroups,
   getPrefillGroups,
   getUpstreamPasswordFeature,
+  previewUpstreamGroupRatios,
   refreshCodexCredential,
   updateChannel,
 } from '../../api'
@@ -312,6 +314,8 @@ export function ChannelMutateDrawer({
   const [codexOAuthDialogOpen, setCodexOAuthDialogOpen] = useState(false)
   const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
     useState(false)
+  const [isFetchingUpstreamRatios, setIsFetchingUpstreamRatios] =
+    useState(false)
   const initialModelsRef = useRef<string[]>([])
   const initialModelMappingRef = useRef<string>('')
   const initialStatusCodeMappingRef = useRef<string>('')
@@ -414,6 +418,13 @@ export function ChannelMutateDrawer({
   const upstreamModelUpdateCheckEnabled = form.watch(
     'upstream_model_update_check_enabled'
   )
+  const upstreamGroup = form.watch('upstream_group')
+  const upstreamGroupRatio = Number(form.watch('upstream_group_ratio') || 0)
+  const upstreamTopupRatio = Number(form.watch('upstream_topup_ratio') || 1)
+  const upstreamEffectiveRatio =
+    upstreamGroupRatio > 0 && upstreamTopupRatio > 0
+      ? upstreamGroupRatio / upstreamTopupRatio
+      : 0
   const currentSettings = form.watch('settings')
   const {
     unlocked: doubaoApiEditUnlocked,
@@ -798,6 +809,74 @@ export function ChannelMutateDrawer({
       setIsCodexCredentialRefreshing(false)
     }
   }, [channelId, queryClient, t])
+
+  const handleFetchUpstreamRatios = useCallback(async () => {
+    setIsFetchingUpstreamRatios(true)
+    try {
+      const response = channelId
+        ? await fetchUpstreamGroupRatios(channelId)
+        : await previewUpstreamGroupRatios({
+            base_url: form.getValues('base_url') || '',
+            type: form.getValues('type'),
+            key: form.getValues('key') || '',
+          })
+      if (!response.success || !response.data) {
+        throw new Error(response.message || t('Failed to fetch upstream ratios'))
+      }
+
+      const ratios = response.data.group_ratios || {}
+      const raw =
+        response.data.group_ratios_raw ||
+        JSON.stringify(ratios, null, 2)
+      form.setValue('upstream_group_ratios', raw, {
+        shouldDirty: true,
+        shouldValidate: true,
+      })
+
+      const currentGroup = String(upstreamGroup || '').trim()
+      const matchedRatio = Object.entries(ratios).find(
+        ([group]) => group.trim() === currentGroup
+      )?.[1]
+      if (currentGroup && typeof matchedRatio === 'number') {
+        form.setValue('upstream_group_ratio', matchedRatio, {
+          shouldDirty: true,
+          shouldValidate: true,
+        })
+      } else if (currentGroup) {
+        toast.info(t('No matching upstream group ratio found'))
+      }
+
+      const fetchedTopupRatio = response.data.topup_ratio
+      if (
+        typeof fetchedTopupRatio === 'number' &&
+        Number.isFinite(fetchedTopupRatio) &&
+        fetchedTopupRatio > 0
+      ) {
+        form.setValue(
+          'upstream_topup_ratio',
+          Math.round(fetchedTopupRatio * 10000) / 10000,
+          {
+            shouldDirty: true,
+            shouldValidate: true,
+          }
+        )
+      }
+
+      toast.success(
+        response.data.message
+          ? t('Upstream ratios fetched with notes')
+          : t('Upstream ratios fetched')
+      )
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to fetch upstream ratios')
+      )
+    } finally {
+      setIsFetchingUpstreamRatios(false)
+    }
+  }, [channelId, form, t, upstreamGroup])
 
   // Unified function to update models
   const updateModels = useCallback(
@@ -2274,10 +2353,31 @@ export function ChannelMutateDrawer({
                     name='upstream_group'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('Upstream Group')}</FormLabel>
+                        <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                          <FormLabel>{t('Upstream Group')}</FormLabel>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='sm'
+                            onClick={handleFetchUpstreamRatios}
+                            disabled={isFetchingUpstreamRatios}
+                          >
+                            {isFetchingUpstreamRatios ? (
+                              <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                            ) : (
+                              <RefreshCw className='mr-2 h-4 w-4' />
+                            )}
+                            {t('Fetch upstream ratios')}
+                          </Button>
+                        </div>
                         <FormControl>
                           <Input placeholder={t('e.g., default')} {...field} />
                         </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Fetch ratios from upstream and match this group to update the ratio field.'
+                          )}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -2307,7 +2407,52 @@ export function ChannelMutateDrawer({
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={form.control}
+                    name='upstream_topup_ratio'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Upstream Top-up Ratio')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            step='0.0001'
+                            min='0'
+                            placeholder='1'
+                            value={field.value ?? 1}
+                            onChange={(event) =>
+                              field.onChange(Number(event.target.value) || 1)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'How many USD-equivalent upstream credits 1 CNY buys. Empty or 0 means 1.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
+
+                <Alert>
+                  <AlertDescription className='flex flex-col gap-1 text-xs sm:flex-row sm:items-center sm:justify-between'>
+                    <span>
+                      {t('Effective Upstream Ratio')}:{' '}
+                      <span className='font-semibold'>
+                        {upstreamEffectiveRatio > 0
+                          ? `${upstreamEffectiveRatio.toFixed(4)}x`
+                          : '-'}
+                      </span>
+                    </span>
+                    <span>
+                      {t(
+                        'Calculated as upstream group ratio / upstream top-up ratio.'
+                      )}
+                    </span>
+                  </AlertDescription>
+                </Alert>
 
                 <FormField
                   control={form.control}
@@ -2447,15 +2592,31 @@ export function ChannelMutateDrawer({
                     )}
                 </div>
 
-                <FormField
-                  control={form.control}
-                  name='upstream_group_ratios'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Upstream Group Ratios')}</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder='{"default":1,"vip":0.8}'
+	                <FormField
+	                  control={form.control}
+	                  name='upstream_group_ratios'
+	                  render={({ field }) => (
+	                    <FormItem>
+	                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+	                        <FormLabel>{t('Upstream Group Ratios')}</FormLabel>
+	                        <Button
+	                          type='button'
+	                          variant='outline'
+	                          size='sm'
+	                          onClick={handleFetchUpstreamRatios}
+	                          disabled={isFetchingUpstreamRatios}
+	                        >
+	                          {isFetchingUpstreamRatios ? (
+	                            <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+	                          ) : (
+	                            <RefreshCw className='mr-2 h-4 w-4' />
+	                          )}
+	                          {t('Fetch upstream ratios')}
+	                        </Button>
+	                      </div>
+	                      <FormControl>
+	                        <Textarea
+	                          placeholder='{"default":1,"vip":0.8}'
                           rows={3}
                           {...field}
                         />

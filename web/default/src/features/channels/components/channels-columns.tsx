@@ -138,6 +138,12 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
   }
 
   const hasInsufficientState = profile.last_insufficient_at > 0
+  const effectiveRatio =
+    profile.upstream_effective_ratio > 0
+      ? profile.upstream_effective_ratio
+      : profile.upstream_group_ratio > 0 && profile.upstream_topup_ratio > 0
+        ? profile.upstream_group_ratio / profile.upstream_topup_ratio
+        : 0
 
   return (
     <TooltipProvider delay={100}>
@@ -182,6 +188,14 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
                   copyable={false}
                 />
               )}
+              {effectiveRatio > 0 && (
+                <StatusBadge
+                  label={`${t('Effective')} ${effectiveRatio.toFixed(4)}x`}
+                  variant='success'
+                  size='sm'
+                  copyable={false}
+                />
+              )}
               {hasInsufficientState && (
                 <StatusBadge
                   label={t('Low balance')}
@@ -209,6 +223,16 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
               {profile.upstream_group_ratio > 0
                 ? `${profile.upstream_group_ratio.toFixed(4)}x`
                 : '-'}
+            </div>
+            <div>
+              {t('Upstream Top-up Ratio')}:{' '}
+              {profile.upstream_topup_ratio > 0
+                ? `${profile.upstream_topup_ratio.toFixed(4)}x`
+                : '-'}
+            </div>
+            <div>
+              {t('Effective Upstream Ratio')}:{' '}
+              {effectiveRatio > 0 ? `${effectiveRatio.toFixed(4)}x` : '-'}
             </div>
             {profile.last_insufficient_at > 0 && (
               <>

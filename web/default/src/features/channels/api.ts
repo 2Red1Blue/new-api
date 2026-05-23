@@ -29,6 +29,8 @@ import type {
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
+  FetchUpstreamGroupRatiosResponse,
+  FetchUpstreamGroupRatiosPreviewParams,
   GetChannelResponse,
   GetChannelsParams,
   GetChannelsResponse,
@@ -203,6 +205,22 @@ export async function fetchUpstreamModels(
   id: number
 ): Promise<FetchModelsResponse> {
   const res = await api.get(`/api/channel/fetch_models/${id}`)
+  return res.data
+}
+
+export async function fetchUpstreamGroupRatios(
+  id: number
+): Promise<FetchUpstreamGroupRatiosResponse> {
+  const res = await api.get(`/api/channel/${id}/upstream_group_ratios`, {
+    disableDuplicate: true,
+  } as ExtendedApiConfig)
+  return res.data
+}
+
+export async function previewUpstreamGroupRatios(
+  data: FetchUpstreamGroupRatiosPreviewParams
+): Promise<FetchUpstreamGroupRatiosResponse> {
+  const res = await api.post('/api/channel/upstream_group_ratios', data)
   return res.data
 }
 

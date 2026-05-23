@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -50,6 +52,20 @@ type OpenAIModel struct {
 type OpenAIModelsResponse struct {
 	Data    []OpenAIModel `json:"data"`
 	Success bool          `json:"success"`
+}
+
+type UpstreamGroupRatiosFetchResponse struct {
+	GroupRatios    map[string]float64 `json:"group_ratios"`
+	GroupRatiosRaw string             `json:"group_ratios_raw"`
+	TopupRatio     float64            `json:"topup_ratio"`
+	Source         string             `json:"source"`
+	Message        string             `json:"message,omitempty"`
+}
+
+type UpstreamGroupRatiosPreviewRequest struct {
+	BaseURL string `json:"base_url"`
+	Type    int    `json:"type"`
+	Key     string `json:"key"`
 }
 
 func parseStatusFilter(statusParam string) int {
@@ -275,6 +291,206 @@ func FetchUpstreamModels(c *gin.Context) {
 		"message": "",
 		"data":    ids,
 	})
+}
+
+func FetchChannelUpstreamGroupRatios(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	fetchAndWriteUpstreamGroupRatios(c, strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/"))
+}
+
+func PreviewChannelUpstreamGroupRatios(c *gin.Context) {
+	var req UpstreamGroupRatiosPreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数格式错误",
+		})
+		return
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	if baseURL == "" && req.Type > 0 {
+		baseURL = strings.TrimRight(strings.TrimSpace(constant.ChannelBaseURLs[req.Type]), "/")
+	}
+	fetchAndWriteUpstreamGroupRatios(c, baseURL)
+}
+
+func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string) {
+	if baseURL == "" || !strings.HasPrefix(baseURL, "http") {
+		common.ApiErrorMsg(c, "当前渠道没有有效的上游地址")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	result := UpstreamGroupRatiosFetchResponse{
+		GroupRatios: map[string]float64{},
+	}
+	var messages []string
+
+	if ratios, raw, source, err := fetchUpstreamGroupRatios(ctx, client, baseURL); err == nil {
+		result.GroupRatios = ratios
+		result.GroupRatiosRaw = raw
+		result.Source = source
+	} else {
+		messages = append(messages, "分组倍率获取失败: "+err.Error())
+	}
+
+	if topupRatio, ok, err := fetchUpstreamTopupRatio(ctx, client, baseURL); err == nil && ok {
+		result.TopupRatio = topupRatio
+		if result.Source == "" {
+			result.Source = baseURL + "/api/status"
+		}
+	} else if err != nil {
+		messages = append(messages, "充值倍率获取失败: "+err.Error())
+	}
+
+	if len(result.GroupRatios) == 0 && len(messages) > 0 {
+		common.ApiErrorMsg(c, strings.Join(messages, "；"))
+		return
+	}
+	result.Message = strings.Join(messages, "；")
+	common.ApiSuccess(c, result)
+}
+
+func fetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL string) (map[string]float64, string, string, error) {
+	endpoints := []string{"/api/ratio_config", "/api/pricing"}
+	var lastErr error
+	for _, endpoint := range endpoints {
+		source := baseURL + endpoint
+		body, err := fetchUpstreamJSON(ctx, client, source)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		data := unwrapSuccessData(body)
+		ratios := extractFloatMapByKeys(body, "group_ratio", "group_ratios", "topup_group_ratio")
+		if len(ratios) == 0 {
+			ratios = extractFloatMapByKeys(data, "group_ratio", "group_ratios", "topup_group_ratio")
+		}
+		if len(ratios) == 0 {
+			lastErr = errors.New("上游未返回 group_ratio")
+			continue
+		}
+		rawBytes, err := common.MarshalIndent(ratios, "", "  ")
+		if err != nil {
+			return nil, "", "", err
+		}
+		return ratios, string(rawBytes), source, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("上游未返回 group_ratio")
+	}
+	return nil, "", "", lastErr
+}
+
+func fetchUpstreamTopupRatio(ctx context.Context, client *http.Client, baseURL string) (float64, bool, error) {
+	body, err := fetchUpstreamJSON(ctx, client, baseURL+"/api/status")
+	if err != nil {
+		return 0, false, err
+	}
+	data := unwrapSuccessData(body)
+	if ratio, ok := findFloatByKeys(data, "topup_ratio", "top_up_ratio", "recharge_ratio", "upstream_topup_ratio"); ok && ratio > 0 {
+		return ratio, true, nil
+	}
+
+	price, priceOK := findFloatByKeys(data, "price")
+	quotaPerUnit, quotaOK := findFloatByKeys(data, "quota_per_unit")
+	if priceOK && quotaOK && price > 0 && quotaPerUnit > 0 {
+		return quotaPerUnit / common.QuotaPerUnit / price, true, nil
+	}
+	return 0, false, nil
+}
+
+func fetchUpstreamJSON(ctx context.Context, client *http.Client, url string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("上游返回 %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := common.DecodeJson(bytes.NewReader(body), &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func unwrapSuccessData(payload map[string]any) any {
+	if data, ok := payload["data"]; ok {
+		return data
+	}
+	return payload
+}
+
+func extractFloatMapByKeys(value any, keys ...string) map[string]float64 {
+	if record, ok := value.(map[string]any); ok {
+		for _, key := range keys {
+			if ratios := convertFloatMap(record[key]); len(ratios) > 0 {
+				return ratios
+			}
+		}
+		for _, nestedKey := range []string{"data", "ratio_config", "ratios"} {
+			if ratios := extractFloatMapByKeys(record[nestedKey], keys...); len(ratios) > 0 {
+				return ratios
+			}
+		}
+	}
+	return nil
+}
+
+func convertFloatMap(value any) map[string]float64 {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]float64, len(record))
+	for key, raw := range record {
+		if ratio, ok := asFloat64(raw); ok {
+			result[key] = ratio
+		}
+	}
+	return result
+}
+
+func findFloatByKeys(value any, keys ...string) (float64, bool) {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	for _, key := range keys {
+		if number, ok := asFloat64(record[key]); ok {
+			return number, true
+		}
+	}
+	for _, nestedKey := range []string{"data", "status", "payment", "config"} {
+		if number, ok := findFloatByKeys(record[nestedKey], keys...); ok {
+			return number, true
+		}
+	}
+	return 0, false
 }
 
 func FixChannelsAbilities(c *gin.Context) {
@@ -1194,21 +1410,28 @@ func FetchModels(c *gin.Context) {
 
 	response, err := client.Do(request)
 	if err != nil {
+		common.SysError(fmt.Sprintf("fetch models request failed: type=%d base_url=%s err=%s", req.Type, baseURL, err.Error()))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
+	defer response.Body.Close()
 	//check status code
 	if response.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+		bodyText := strings.TrimSpace(string(bodyBytes))
+		if bodyText == "" {
+			bodyText = response.Status
+		}
+		common.SysError(fmt.Sprintf("fetch models upstream failed: type=%d base_url=%s status=%d body=%s", req.Type, baseURL, response.StatusCode, bodyText))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Failed to fetch models",
+			"message": fmt.Sprintf("获取模型失败，上游返回 %d: %s", response.StatusCode, bodyText),
 		})
 		return
 	}
-	defer response.Body.Close()
 
 	var result struct {
 		Data []struct {

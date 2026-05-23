@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
@@ -100,6 +100,7 @@ export function PublicHeader(props: PublicHeaderProps) {
   const notifications = useNotifications()
   const routerState = useRouterState()
   const pathname = routerState.location.pathname
+  const autoOpenedPathRef = useRef<string | null>(null)
 
   const user = auth.user
   const isAuthenticated = !!user
@@ -119,6 +120,39 @@ export function PublicHeader(props: PublicHeaderProps) {
       document.body.style.overflow = ''
     }
   }, [mobileOpen])
+
+  useEffect(() => {
+    const isHomePage = pathname === '/'
+
+    if (!isHomePage) {
+      autoOpenedPathRef.current = null
+      return
+    }
+
+    if (notifications.loading || notifications.dialogOpen) {
+      return
+    }
+
+    if (!notifications.shouldAutoOpen) {
+      return
+    }
+
+    if (autoOpenedPathRef.current === pathname) {
+      return
+    }
+
+    autoOpenedPathRef.current = pathname
+    notifications.openDialog(
+      notifications.unreadNoticeCount > 0 ? 'notice' : 'announcements'
+    )
+  }, [
+    pathname,
+    notifications.loading,
+    notifications.dialogOpen,
+    notifications.shouldAutoOpen,
+    notifications.openDialog,
+    notifications.unreadNoticeCount,
+  ])
 
   useEffect(() => {
     if (!authPromptTarget) return

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNotificationStore } from '@/stores/notification-store'
 import { getNotice } from '@/lib/api'
@@ -120,8 +120,11 @@ export function useNotifications() {
     }
   }, [noticeContent, lastReadNotice, announcements, isAnnouncementRead])
 
+  const hasUnreadNotifications = unreadCounts.total > 0
+  const shouldAutoOpen = hasUnreadNotifications && !isNoticeClosed()
+
   // Handle dialog open
-  const handleOpenDialog = (tab?: 'notice' | 'announcements') => {
+  const handleOpenDialog = useCallback((tab?: 'notice' | 'announcements') => {
     // Mark Notice as read when opening dialog
     if (noticeContent) {
       markNoticeRead(noticeContent)
@@ -129,7 +132,7 @@ export function useNotifications() {
 
     setActiveTab(tab || 'notice')
     setDialogOpen(true)
-  }
+  }, [markNoticeRead, noticeContent])
 
   // Handle tab change - mark announcements as read when switching to that tab
   const handleTabChange = (tab: 'notice' | 'announcements') => {
@@ -172,6 +175,8 @@ export function useNotifications() {
     closeDialog: () => setDialogOpen(false),
     closeToday: handleCloseToday,
     refetchNotice,
+    shouldAutoOpen,
+    hasUnreadNotifications,
 
     // Status
     isNoticeClosed: isNoticeClosed(),
