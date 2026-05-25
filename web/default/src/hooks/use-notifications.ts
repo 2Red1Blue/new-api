@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNotificationStore } from '@/stores/notification-store'
 import { getNotice } from '@/lib/api'
@@ -62,7 +62,7 @@ function getAnnouncementKey(item: Record<string, unknown>): string {
  * Provides unread counts and read status management
  */
 export function useNotifications() {
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [popoverOpen, setPopoverOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'notice' | 'announcements'>(
     'notice'
   )
@@ -93,7 +93,6 @@ export function useNotifications() {
     markAnnouncementsRead,
     isAnnouncementRead,
     isNoticeClosed,
-    setClosedUntilDate,
   } = useNotificationStore()
 
   // Extract notice content
@@ -120,25 +119,8 @@ export function useNotifications() {
     }
   }, [noticeContent, lastReadNotice, announcements, isAnnouncementRead])
 
-  const hasUnreadNotifications = unreadCounts.total > 0
-  const shouldAutoOpen = hasUnreadNotifications && !isNoticeClosed()
-
-  // Handle dialog open
-  const handleOpenDialog = useCallback((tab?: 'notice' | 'announcements') => {
-    // Mark Notice as read when opening dialog
-    if (noticeContent) {
-      markNoticeRead(noticeContent)
-    }
-
-    setActiveTab(tab || 'notice')
-    setDialogOpen(true)
-  }, [markNoticeRead, noticeContent])
-
-  // Handle tab change - mark announcements as read when switching to that tab
-  const handleTabChange = (tab: 'notice' | 'announcements') => {
-    setActiveTab(tab)
-
-    if (tab === 'announcements' && announcements.length > 0) {
+  const markAnnouncementsAsRead = () => {
+    if (announcements.length > 0) {
       const allKeys = announcements.map((item: Record<string, unknown>) =>
         getAnnouncementKey(item)
       )
@@ -146,11 +128,38 @@ export function useNotifications() {
     }
   }
 
-  // Handle "Close Today" action
-  const handleCloseToday = () => {
-    const today = new Date().toDateString()
-    setClosedUntilDate(today)
-    setDialogOpen(false)
+  // Handle popover open
+  const handleOpenPopover = (tab?: 'notice' | 'announcements') => {
+    const nextTab = tab || activeTab
+
+    // Mark currently visible content as read when opening the notification center
+    if (noticeContent) {
+      markNoticeRead(noticeContent)
+    }
+    if (nextTab === 'announcements') {
+      markAnnouncementsAsRead()
+    }
+
+    setActiveTab(nextTab)
+    setPopoverOpen(true)
+  }
+
+  const handlePopoverOpenChange = (open: boolean) => {
+    if (open) {
+      handleOpenPopover(activeTab)
+      return
+    }
+
+    setPopoverOpen(false)
+  }
+
+  // Handle tab change - mark announcements as read when switching to that tab
+  const handleTabChange = (tab: 'notice' | 'announcements') => {
+    setActiveTab(tab)
+
+    if (tab === 'announcements') {
+      markAnnouncementsAsRead()
+    }
   }
 
   return {
@@ -164,21 +173,20 @@ export function useNotifications() {
     unreadNoticeCount: unreadCounts.notice,
     unreadAnnouncementsCount: unreadCounts.announcements,
 
-    // Dialog state
-    dialogOpen,
-    setDialogOpen,
+    // Popover state
+    popoverOpen,
+    setPopoverOpen: handlePopoverOpenChange,
     activeTab,
     setActiveTab: handleTabChange,
 
-    // Actions
-    openDialog: handleOpenDialog,
-    closeDialog: () => setDialogOpen(false),
-    closeToday: handleCloseToday,
-    refetchNotice,
-    shouldAutoOpen,
-    hasUnreadNotifications,
+    // Backward-compatible names used by the public header auto-open flow
+    dialogOpen: popoverOpen,
+    shouldAutoOpen: unreadCounts.total > 0 && !isNoticeClosed(),
 
-    // Status
-    isNoticeClosed: isNoticeClosed(),
+    // Actions
+    openPopover: handleOpenPopover,
+    openDialog: handleOpenPopover,
+    closePopover: () => setPopoverOpen(false),
+    refetchNotice,
   }
 }

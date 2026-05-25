@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { getUserModels, getUserGroups } from './api'
 import { PlaygroundChat } from './components/playground-chat'
 import { PlaygroundInput } from './components/playground-input'
@@ -26,6 +28,7 @@ import { createUserMessage, createLoadingAssistantMessage } from './lib'
 import type { Message as MessageType } from './types'
 
 export function Playground() {
+  const { t } = useTranslation()
   const {
     config,
     parameterEnabled,
@@ -52,14 +55,36 @@ export function Playground() {
   // Load models（按当前分组过滤；切换分组时 queryKey 变化自动重拉）
   const { data: modelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['playground-models', config.group],
-    queryFn: () => getUserModels(config.group),
+    queryFn: async () => {
+      try {
+        return await getUserModels(config.group)
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t('Failed to load playground models')
+        )
+        return []
+      }
+    },
     enabled: Boolean(config.group),
   })
 
   // Load groups
   const { data: groupsData } = useQuery({
     queryKey: ['playground-groups'],
-    queryFn: getUserGroups,
+    queryFn: async () => {
+      try {
+        return await getUserGroups()
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t('Failed to load playground groups')
+        )
+        return []
+      }
+    },
   })
 
   // Update models when data changes

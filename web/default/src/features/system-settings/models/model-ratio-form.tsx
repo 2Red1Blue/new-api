@@ -33,6 +33,12 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  SettingsForm,
+  SettingsSwitchContent,
+  SettingsSwitchItem,
+} from '../components/settings-form-layout'
+import { SettingsPageActionsPortal } from '../components/settings-page-context'
+import {
   ModelRatioVisualEditor,
   type ModelRatioVisualDraft,
 } from './model-ratio-visual-editor'
@@ -118,6 +124,25 @@ export const ModelRatioForm = memo(function ModelRatioForm({
       </div>
 
       <Form {...form}>
+        <SettingsPageActionsPortal>
+          <Button
+            type='button'
+            variant='destructive'
+            size='sm'
+            onClick={onReset}
+            disabled={isResetting}
+          >
+            {t('Reset prices')}
+          </Button>
+          <Button
+            type='button'
+            size='sm'
+            onClick={form.handleSubmit(onSave)}
+            disabled={isSaving}
+          >
+            {isSaving ? t('Saving...') : t('Save model prices')}
+          </Button>
+        </SettingsPageActionsPortal>
         {editMode === 'visual' ? (
           <div className='space-y-6'>
             <ModelRatioVisualEditor
@@ -147,43 +172,27 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               control={form.control}
               name='ExposeRatioEnabled'
               render={({ field }) => (
-                <FormItem className='flex flex-row items-center justify-between rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel className='text-base'>
-                      {t('Expose ratio API')}
-                    </FormLabel>
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Expose ratio API')}</FormLabel>
                     <FormDescription>
                       {t(
                         'Allow clients to query configured ratios via `/api/ratio`.'
                       )}
                     </FormDescription>
-                  </div>
+                  </SettingsSwitchContent>
                   <FormControl>
                     <Switch
                       checked={field.value}
                       onCheckedChange={field.onChange}
                     />
                   </FormControl>
-                </FormItem>
+                </SettingsSwitchItem>
               )}
             />
-
-            <div className='flex flex-wrap gap-4'>
-              <Button onClick={form.handleSubmit(onSave)} disabled={isSaving}>
-                {isSaving ? t('Saving...') : t('Save model prices')}
-              </Button>
-              <Button
-                type='button'
-                variant='destructive'
-                onClick={onReset}
-                disabled={isResetting}
-              >
-                {t('Reset prices')}
-              </Button>
-            </div>
           </div>
         ) : (
-          <form onSubmit={form.handleSubmit(onSave)} className='space-y-6'>
+          <SettingsForm onSubmit={form.handleSubmit(onSave)}>
             <FormField
               control={form.control}
               name='ModelPrice'
@@ -338,41 +347,25 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               control={form.control}
               name='ExposeRatioEnabled'
               render={({ field }) => (
-                <FormItem className='flex flex-row items-center justify-between rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel className='text-base'>
-                      {t('Expose ratio API')}
-                    </FormLabel>
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Expose ratio API')}</FormLabel>
                     <FormDescription>
                       {t(
                         'Allow clients to query configured ratios via `/api/ratio`.'
                       )}
                     </FormDescription>
-                  </div>
+                  </SettingsSwitchContent>
                   <FormControl>
                     <Switch
                       checked={field.value}
                       onCheckedChange={field.onChange}
                     />
                   </FormControl>
-                </FormItem>
+                </SettingsSwitchItem>
               )}
             />
-
-            <div className='flex flex-wrap gap-4'>
-              <Button type='submit' disabled={isSaving}>
-                {isSaving ? t('Saving...') : t('Save model prices')}
-              </Button>
-              <Button
-                type='button'
-                variant='destructive'
-                onClick={onReset}
-                disabled={isResetting}
-              >
-                {t('Reset prices')}
-              </Button>
-            </div>
-          </form>
+          </SettingsForm>
         )}
       </Form>
     </div>
