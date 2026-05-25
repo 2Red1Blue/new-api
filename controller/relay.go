@@ -408,6 +408,10 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, f
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !(isUnavailable && service.ShouldBreakChannelAffinityOnUnavailable(c)) {
 		return false
 	}
+	// 上游不可用（5xx）且配置了 BreakAffinityOnUnavailable，清除亲和性缓存，下次请求重新选渠道
+	if isUnavailable && service.ShouldSkipRetryAfterChannelAffinityFailure(c) && service.ShouldBreakChannelAffinityOnUnavailable(c) {
+		service.InvalidateChannelAffinity(c)
+	}
 	if types.IsChannelError(openaiErr) {
 		return true
 	}

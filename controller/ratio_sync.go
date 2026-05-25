@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -295,23 +296,29 @@ func FetchUpstreamRatios(c *gin.Context) {
 				ch <- upstreamResult{Name: uniqueName, Err: lastErr.Error()}
 				return
 			}
-			defer resp.Body.Close()
+			var bodyBytes []byte
 			if resp.StatusCode != http.StatusOK {
-				logger.LogWarn(c.Request.Context(), "non-200 from "+chItem.Name+": "+resp.Status)
-				ch <- upstreamResult{Name: uniqueName, Err: resp.Status}
-				return
-			}
-
-			// Content-Type 和响应体大小校验
-			if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "application/json") {
-				logger.LogWarn(c.Request.Context(), "unexpected content-type from "+chItem.Name+": "+ct)
-			}
-			limited := io.LimitReader(resp.Body, maxRatioConfigBytes)
-			bodyBytes, err := io.ReadAll(limited)
-			if err != nil {
-				logger.LogWarn(c.Request.Context(), "read response failed from "+chItem.Name+": "+err.Error())
-				ch <- upstreamResult{Name: uniqueName, Err: err.Error()}
-				return
+				_ = resp.Body.Close()
+				authBody, authErr := fetchAuthenticatedUpstreamBody(ctx, chItem.BaseURL, fullURL, chItem.ID)
+				if authErr != nil {
+					logger.LogWarn(c.Request.Context(), "non-200 from "+chItem.Name+": "+resp.Status)
+					ch <- upstreamResult{Name: uniqueName, Err: resp.Status}
+					return
+				}
+				bodyBytes = authBody
+			} else {
+				defer resp.Body.Close()
+				// Content-Type 和响应体大小校验
+				if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "application/json") {
+					logger.LogWarn(c.Request.Context(), "unexpected content-type from "+chItem.Name+": "+ct)
+				}
+				limited := io.LimitReader(resp.Body, maxRatioConfigBytes)
+				bodyBytes, err = io.ReadAll(limited)
+				if err != nil {
+					logger.LogWarn(c.Request.Context(), "read response failed from "+chItem.Name+": "+err.Error())
+					ch <- upstreamResult{Name: uniqueName, Err: err.Error()}
+					return
+				}
 			}
 
 			// type3: OpenRouter /v1/models -> convert per-token pricing to ratios
@@ -982,6 +989,34 @@ func convertModelsDevToRatioData(reader io.Reader) (map[string]any, error) {
 		converted["cache_ratio"] = cacheRatioMap
 	}
 	return converted, nil
+}
+
+func fetchAuthenticatedUpstreamBody(ctx context.Context, baseURL string, fullURL string, channelID int) ([]byte, error) {
+	if channelID == 0 {
+		return nil, errors.New("channel id is required for authenticated upstream fetch")
+	}
+	credential := upstreamCredentialFromProfile(channelID)
+	if credential == nil {
+		return nil, errors.New("upstream credential is not configured")
+	}
+	client, userID, err := loginUpstreamForPricing(ctx, baseURL, credential)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("New-Api-User", userID)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("authenticated upstream returned %s", resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxRatioConfigBytes))
 }
 
 func GetSyncableChannels(c *gin.Context) {

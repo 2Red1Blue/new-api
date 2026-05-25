@@ -277,7 +277,7 @@ export async function getChannelKey(
 export async function getUpstreamPasswordFeature(): Promise<{
   success: boolean
   message?: string
-  data?: { enabled: boolean }
+  data?: { enabled: boolean; reveal_enabled?: boolean }
 }> {
   const res = await api.get('/api/channel/upstream_password/feature')
   return res.data

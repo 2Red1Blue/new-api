@@ -42,11 +42,18 @@ export interface UptimeMonitor {
   uptime: number
   status: number
   group?: string
+  heartbeats?: UptimeHeartbeat[]
 }
 
 export interface UptimeGroupResult {
   categoryName: string
   monitors: UptimeMonitor[]
+}
+
+export interface UptimeHeartbeat {
+  status: number
+  time?: string
+  ping?: number | null
 }
 
 // ============================================================================
@@ -130,6 +137,7 @@ export interface AnnouncementItem {
 
 export interface FAQItem {
   id?: number
+  sort_order?: number
   question: string
   answer: string
 }

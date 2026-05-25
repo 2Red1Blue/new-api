@@ -395,6 +395,8 @@ export interface FetchUpstreamGroupRatiosPreviewParams {
   base_url: string
   type: number
   key: string
+  upstream_account?: string
+  upstream_password?: string
 }
 
 export type UpdateChannelRequest = Omit<Partial<Channel>, 'upstream_profile'> & {

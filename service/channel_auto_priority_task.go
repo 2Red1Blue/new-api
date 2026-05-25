@@ -27,9 +27,11 @@ var (
 )
 
 type ChannelAutoPriorityScanResult struct {
-	Scanned int  `json:"scanned"`
-	Applied int  `json:"applied"`
-	Skipped bool `json:"skipped"`
+	Scanned      int  `json:"scanned"`
+	Applied      int  `json:"applied"`
+	RatioSynced  int  `json:"ratio_synced"`
+	RatioFailed  int  `json:"ratio_failed"`
+	Skipped      bool `json:"skipped"`
 }
 
 func normalizeAutoPriorityScanInterval(hours float64) time.Duration {
@@ -69,15 +71,29 @@ func RunChannelAutoPriorityScanOnce() (ChannelAutoPriorityScanResult, error) {
 	}
 	defer channelAutoPriorityScanRunning.Store(false)
 
+	ctx := context.Background()
+
+	// 第一步：拉取所有渠道的上游分组倍率并写入数据库
+	ratioSynced, ratioFailed, syncErr := SyncAllChannelUpstreamGroupRatios(ctx, channelAutoPriorityScanBatchSize)
+	if syncErr != nil {
+		return ChannelAutoPriorityScanResult{}, syncErr
+	}
+	if common.DebugEnabled || ratioSynced > 0 || ratioFailed > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("upstream group ratio sync finished: synced=%d failed=%d", ratioSynced, ratioFailed))
+	}
+
+	// 第二步：重新计算所有渠道的自动优先级
 	scanned, applied, err := model.RecalculateAllChannelAutoPriorities(channelAutoPriorityScanBatchSize)
 	if err != nil {
 		return ChannelAutoPriorityScanResult{}, err
 	}
 	if common.DebugEnabled || applied > 0 {
-		logger.LogInfo(context.Background(), fmt.Sprintf("channel auto-priority scan finished: scanned=%d applied=%d", scanned, applied))
+		logger.LogInfo(ctx, fmt.Sprintf("channel auto-priority scan finished: scanned=%d applied=%d", scanned, applied))
 	}
 	return ChannelAutoPriorityScanResult{
-		Scanned: scanned,
-		Applied: applied,
+		Scanned:     scanned,
+		Applied:     applied,
+		RatioSynced: ratioSynced,
+		RatioFailed: ratioFailed,
 	}, nil
 }

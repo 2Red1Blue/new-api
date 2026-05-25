@@ -24,10 +24,17 @@ const (
 )
 
 type Monitor struct {
-	Name   string  `json:"name"`
-	Uptime float64 `json:"uptime"`
-	Status int     `json:"status"`
-	Group  string  `json:"group,omitempty"`
+	Name       string          `json:"name"`
+	Uptime     float64         `json:"uptime"`
+	Status     int             `json:"status"`
+	Group      string          `json:"group,omitempty"`
+	Heartbeats []HeartbeatItem `json:"heartbeats,omitempty"`
+}
+
+type HeartbeatItem struct {
+	Status int    `json:"status"`
+	Time   string `json:"time,omitempty"`
+	Ping   *int64 `json:"ping,omitempty"`
 }
 
 type UptimeGroupResult struct {
@@ -82,9 +89,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 	}
 
 	var heartbeatData struct {
-		HeartbeatList map[string][]struct {
-			Status int `json:"status"`
-		} `json:"heartbeatList"`
+		HeartbeatList map[string][]HeartbeatItem `json:"heartbeatList"`
 		UptimeList map[string]float64 `json:"uptimeList"`
 	}
 
@@ -119,6 +124,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 
 			if heartbeats, exists := heartbeatData.HeartbeatList[monitorID]; exists && len(heartbeats) > 0 {
 				monitor.Status = heartbeats[0].Status
+				monitor.Heartbeats = heartbeats
 			}
 
 			result.Monitors = append(result.Monitors, monitor)

@@ -32,11 +32,25 @@ type UpstreamInsufficientNotificationContext struct {
 }
 
 func IsUpstreamPasswordEnabled() bool {
+	return strings.TrimSpace(upstreamEncryptionSecret()) != ""
+}
+
+func IsUpstreamPasswordRevealEnabled() bool {
 	return strings.TrimSpace(common.UpstreamSecretKey) != ""
 }
 
+func upstreamEncryptionSecret() string {
+	if secret := strings.TrimSpace(common.UpstreamSecretKey); secret != "" {
+		return secret
+	}
+	if secret := strings.TrimSpace(common.CryptoSecret); secret != "" {
+		return secret
+	}
+	return strings.TrimSpace(common.SessionSecret)
+}
+
 func upstreamSecretBytes() []byte {
-	sum := sha256.Sum256([]byte(common.UpstreamSecretKey))
+	sum := sha256.Sum256([]byte(upstreamEncryptionSecret()))
 	return sum[:]
 }
 

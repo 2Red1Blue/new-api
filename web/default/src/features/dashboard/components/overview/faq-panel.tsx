@@ -33,6 +33,12 @@ import { PanelWrapper } from '../ui/panel-wrapper'
 export function FAQPanel() {
   const { t } = useTranslation()
   const { items: list, loading } = useFAQ()
+  const sortedList = [...list].sort((a, b) => {
+    const orderDiff = (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
+      (b.sort_order ?? Number.MAX_SAFE_INTEGER)
+    if (orderDiff !== 0) return orderDiff
+    return (a.id ?? 0) - (b.id ?? 0)
+  })
 
   return (
     <PanelWrapper
@@ -44,14 +50,14 @@ export function FAQPanel() {
       }
       description={t('Answers for common access and billing questions')}
       loading={loading}
-      empty={!list.length}
+      empty={!sortedList.length}
       emptyMessage={t('No FAQ entries available')}
-      height='h-80'
+      height='h-96'
       contentClassName='p-0'
     >
-      <ScrollArea className='h-80'>
-        <Accordion className='w-full px-4 sm:px-5'>
-          {list.map((item: FAQItem, idx: number) => {
+      <ScrollArea className='h-96'>
+        <Accordion className='w-full px-4 pb-3 sm:px-5'>
+          {sortedList.map((item: FAQItem, idx: number) => {
             const key = item.id ?? `faq-${idx}`
             const value = `item-${key}`
             return (

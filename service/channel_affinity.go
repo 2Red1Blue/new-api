@@ -754,6 +754,18 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	}
 }
 
+// InvalidateChannelAffinity 清除当前请求的渠道亲和性缓存，使下次请求重新选渠道
+func InvalidateChannelAffinity(c *gin.Context) {
+	cacheKey, _, ok := getChannelAffinityContext(c)
+	if !ok || cacheKey == "" {
+		return
+	}
+	affinityCache := getChannelAffinityCache()
+	if _, err := affinityCache.DeleteMany([]string{cacheKey}); err != nil {
+		common.SysError(fmt.Sprintf("channel affinity cache invalidate failed: key=%s, err=%v", cacheKey, err))
+	}
+}
+
 type ChannelAffinityUsageCacheStats struct {
 	RuleName            string `json:"rule_name"`
 	UsingGroup          string `json:"using_group"`

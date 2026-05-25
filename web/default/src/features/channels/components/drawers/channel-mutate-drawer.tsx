@@ -412,6 +412,8 @@ export function ChannelMutateDrawer({
 
   const upstreamPasswordEnabled =
     upstreamPasswordFeature?.data?.enabled === true
+  const upstreamPasswordRevealEnabled =
+    upstreamPasswordFeature?.data?.reveal_enabled === true
 
   // Check if this is a multi-key channel
   const isMultiKeyChannel =
@@ -863,6 +865,8 @@ export function ChannelMutateDrawer({
             base_url: form.getValues('base_url') || '',
             type: form.getValues('type'),
             key: form.getValues('key') || '',
+            upstream_account: form.getValues('upstream_account') || '',
+            upstream_password: form.getValues('upstream_password') || '',
           })
       if (!response.success || !response.data) {
         throw new Error(response.message || t('Failed to fetch upstream ratios'))
@@ -2644,7 +2648,7 @@ export function ChannelMutateDrawer({
                               upstreamPasswordEnabled
                                 ? t('Leave empty to keep existing password')
                                 : t(
-                                    'Set UPSTREAM_SECRET_KEY to enable password storage'
+                                    'Password storage is unavailable in this deployment'
                                   )
                             }
                             disabled={!upstreamPasswordEnabled}
@@ -2657,7 +2661,7 @@ export function ChannelMutateDrawer({
                                 'Encrypted with AES-256-GCM before saving. Not included in notification emails.'
                               )
                             : t(
-                                'Password storage is hidden until UPSTREAM_SECRET_KEY is configured.'
+                                'Password storage is unavailable in this deployment.'
                               )}
                         </FormDescription>
                         <FormMessage />
@@ -2668,7 +2672,7 @@ export function ChannelMutateDrawer({
                   {isEditing &&
                     channelData?.data?.upstream_profile
                       ?.password_configured &&
-                    upstreamPasswordEnabled && (
+                    upstreamPasswordRevealEnabled && (
                       <div className='space-y-3'>
                         <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                           <div>

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strconv"
 	"strings"
 	"time"
@@ -63,9 +64,16 @@ type UpstreamGroupRatiosFetchResponse struct {
 }
 
 type UpstreamGroupRatiosPreviewRequest struct {
-	BaseURL string `json:"base_url"`
-	Type    int    `json:"type"`
-	Key     string `json:"key"`
+	BaseURL          string `json:"base_url"`
+	Type             int    `json:"type"`
+	Key              string `json:"key"`
+	UpstreamAccount  string `json:"upstream_account"`
+	UpstreamPassword string `json:"upstream_password"`
+}
+
+type upstreamPricingCredential struct {
+	Account  string
+	Password string
 }
 
 func parseStatusFilter(statusParam string) int {
@@ -306,7 +314,8 @@ func FetchChannelUpstreamGroupRatios(c *gin.Context) {
 		return
 	}
 
-	fetchAndWriteUpstreamGroupRatios(c, strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/"))
+	credential := upstreamCredentialFromProfile(channel.Id)
+	fetchAndWriteUpstreamGroupRatios(c, strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/"), credential)
 }
 
 func PreviewChannelUpstreamGroupRatios(c *gin.Context) {
@@ -322,10 +331,13 @@ func PreviewChannelUpstreamGroupRatios(c *gin.Context) {
 	if baseURL == "" && req.Type > 0 {
 		baseURL = strings.TrimRight(strings.TrimSpace(constant.ChannelBaseURLs[req.Type]), "/")
 	}
-	fetchAndWriteUpstreamGroupRatios(c, baseURL)
+	fetchAndWriteUpstreamGroupRatios(c, baseURL, &upstreamPricingCredential{
+		Account:  strings.TrimSpace(req.UpstreamAccount),
+		Password: strings.TrimSpace(req.UpstreamPassword),
+	})
 }
 
-func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string) {
+func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string, credential *upstreamPricingCredential) {
 	if baseURL == "" || !strings.HasPrefix(baseURL, "http") {
 		common.ApiErrorMsg(c, "当前渠道没有有效的上游地址")
 		return
@@ -340,7 +352,7 @@ func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string) {
 	}
 	var messages []string
 
-	if ratios, raw, source, err := fetchUpstreamGroupRatios(ctx, client, baseURL); err == nil {
+	if ratios, raw, source, err := fetchUpstreamGroupRatios(ctx, client, baseURL, credential); err == nil {
 		result.GroupRatios = ratios
 		result.GroupRatiosRaw = raw
 		result.Source = source
@@ -365,12 +377,51 @@ func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string) {
 	common.ApiSuccess(c, result)
 }
 
-func fetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL string) (map[string]float64, string, string, error) {
+func upstreamCredentialFromProfile(channelId int) *upstreamPricingCredential {
+	profile, err := model.GetChannelUpstreamProfileByChannelId(channelId)
+	if err != nil || profile == nil {
+		return nil
+	}
+	account := strings.TrimSpace(profile.UpstreamAccount)
+	if account == "" || strings.TrimSpace(profile.UpstreamPasswordEnc) == "" {
+		return nil
+	}
+	password, err := service.DecryptUpstreamPassword(profile.UpstreamPasswordEnc)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to decrypt upstream password for channel #%d: %s", channelId, err.Error()))
+		return nil
+	}
+	return &upstreamPricingCredential{
+		Account:  account,
+		Password: password,
+	}
+}
+
+func fetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL string, credential *upstreamPricingCredential) (map[string]float64, string, string, error) {
+	ratios, raw, source, err := fetchUpstreamGroupRatiosWithClient(ctx, client, baseURL, "")
+	if err == nil {
+		return ratios, raw, source, nil
+	}
+	if credential == nil || strings.TrimSpace(credential.Account) == "" || strings.TrimSpace(credential.Password) == "" {
+		return nil, "", "", err
+	}
+	authClient, userID, loginErr := loginUpstreamForPricing(ctx, baseURL, credential)
+	if loginErr != nil {
+		return nil, "", "", fmt.Errorf("%w；登录上游获取价格失败: %v", err, loginErr)
+	}
+	ratios, raw, source, authErr := fetchUpstreamGroupRatiosWithClient(ctx, authClient, baseURL, userID)
+	if authErr != nil {
+		return nil, "", "", fmt.Errorf("%w；登录后获取价格失败: %v", err, authErr)
+	}
+	return ratios, raw, source, nil
+}
+
+func fetchUpstreamGroupRatiosWithClient(ctx context.Context, client *http.Client, baseURL string, userID string) (map[string]float64, string, string, error) {
 	endpoints := []string{"/api/ratio_config", "/api/pricing"}
 	var lastErr error
 	for _, endpoint := range endpoints {
 		source := baseURL + endpoint
-		body, err := fetchUpstreamJSON(ctx, client, source)
+		body, err := fetchUpstreamJSONWithUser(ctx, client, source, userID)
 		if err != nil {
 			lastErr = err
 			continue
@@ -396,6 +447,69 @@ func fetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL 
 	return nil, "", "", lastErr
 }
 
+func loginUpstreamForPricing(ctx context.Context, baseURL string, credential *upstreamPricingCredential) (*http.Client, string, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, "", err
+	}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Jar:     jar,
+	}
+	payload := map[string]string{
+		"username": strings.TrimSpace(credential.Account),
+		"password": strings.TrimSpace(credential.Password),
+	}
+	bodyBytes, err := common.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/user/login", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("上游登录返回 %s", resp.Status)
+	}
+	var response map[string]any
+	if err := common.DecodeJson(io.LimitReader(resp.Body, 1<<20), &response); err != nil {
+		return nil, "", err
+	}
+	success, _ := response["success"].(bool)
+	if !success {
+		message, _ := response["message"].(string)
+		if strings.TrimSpace(message) == "" {
+			message = "上游登录失败"
+		}
+		return nil, "", errors.New(message)
+	}
+	userID := findUserIDString(response["data"])
+	if userID == "" {
+		return nil, "", errors.New("上游登录未返回用户 ID")
+	}
+	return client, userID, nil
+}
+
+func findUserIDString(value any) string {
+	if record, ok := value.(map[string]any); ok {
+		for _, key := range []string{"id", "user_id", "uid"} {
+			if number, ok := asFloat64(record[key]); ok {
+				return strconv.FormatInt(int64(number), 10)
+			}
+			if str, ok := record[key].(string); ok && strings.TrimSpace(str) != "" {
+				return strings.TrimSpace(str)
+			}
+		}
+	}
+	return ""
+}
+
 func fetchUpstreamTopupRatio(ctx context.Context, client *http.Client, baseURL string) (float64, bool, error) {
 	body, err := fetchUpstreamJSON(ctx, client, baseURL+"/api/status")
 	if err != nil {
@@ -415,9 +529,16 @@ func fetchUpstreamTopupRatio(ctx context.Context, client *http.Client, baseURL s
 }
 
 func fetchUpstreamJSON(ctx context.Context, client *http.Client, url string) (map[string]any, error) {
+	return fetchUpstreamJSONWithUser(ctx, client, url, "")
+}
+
+func fetchUpstreamJSONWithUser(ctx context.Context, client *http.Client, url string, userID string) (map[string]any, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(userID) != "" {
+		req.Header.Set("New-Api-User", strings.TrimSpace(userID))
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -694,7 +815,8 @@ func GetUpstreamPasswordFeature(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"enabled": service.IsUpstreamPasswordEnabled(),
+			"enabled":        service.IsUpstreamPasswordEnabled(),
+			"reveal_enabled": service.IsUpstreamPasswordRevealEnabled(),
 		},
 	})
 }
@@ -708,6 +830,10 @@ func GetChannelUpstreamPassword(c *gin.Context) {
 	profile, err := model.GetChannelUpstreamProfileByChannelId(channelId)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if !service.IsUpstreamPasswordRevealEnabled() {
+		common.ApiErrorMsg(c, "UPSTREAM_SECRET_KEY 未配置，已隐藏上游密码明文查看")
 		return
 	}
 	password, err := service.DecryptUpstreamPassword(profile.UpstreamPasswordEnc)
