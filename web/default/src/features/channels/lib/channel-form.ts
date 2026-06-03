@@ -506,6 +506,12 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   return JSON.stringify(settingsObj)
 }
 
+function normalizeBaseUrl(value: string | undefined): string {
+  return String(value || '')
+    .trim()
+    .replace(/\/+$/, '')
+}
+
 /**
  * Transform form data to API payload for creating channel
  */
@@ -521,7 +527,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
   const channel: Partial<Channel> = {
     name: formData.name,
     type: formData.type,
-    base_url: formData.base_url || null,
+    base_url: normalizeBaseUrl(formData.base_url) || null,
     key: formData.key,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
@@ -571,7 +577,7 @@ export function transformFormDataToUpdatePayload(
     id: channelId,
     name: formData.name,
     type: formData.type,
-    base_url: formData.base_url || null,
+    base_url: normalizeBaseUrl(formData.base_url) || null,
     openai_organization: formData.openai_organization || null,
     models: formData.models,
     group: formatGroups(formData.group),
@@ -604,7 +610,7 @@ export function transformFormDataToUpdatePayload(
   })
 
   // Send explicit empty strings for nullable fields so GORM updates can clear them.
-  payload.base_url = formData.base_url || ''
+  payload.base_url = normalizeBaseUrl(formData.base_url) || ''
   payload.openai_organization = formData.openai_organization || ''
   payload.test_model = formData.test_model || ''
   payload.tag = formData.tag || ''

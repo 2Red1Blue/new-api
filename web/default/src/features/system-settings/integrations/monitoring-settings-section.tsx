@@ -48,6 +48,7 @@ import { runAutoPriorityScanOnce } from '../api'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { Button } from '@/components/ui/button'
+import { safeNumberFieldProps } from '../utils/numeric-field'
 
 const numericString = z.string().refine((value) => {
   const trimmed = value.trim()
@@ -379,18 +380,7 @@ export function MonitoringSettingsSection({
                       type='number'
                       min={1}
                       step={1}
-                      value={
-                        typeof field.value === 'number' &&
-                        Number.isFinite(field.value)
-                          ? field.value
-                          : ''
-                      }
-                      onChange={(event) =>
-                        field.onChange(event.target.valueAsNumber)
-                      }
-                      name={field.name}
-                      onBlur={field.onBlur}
-                      ref={field.ref}
+                      {...safeNumberFieldProps(field)}
                     />
                   </FormControl>
                   <FormDescription>

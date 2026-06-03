@@ -100,7 +100,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					types.ErrOptionWithNoRecordErrorLog(),
 				)
 			}
-			logger.LogError(c, fmt.Sprintf("relay error: %s", newAPIError.Error()))
+			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -431,7 +431,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, f
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	errorMessage := err.ErrorWithStatusCode()
 	matchedKeyword, isInsufficientBalance := service.IsInsufficientBalanceError(channelError.ChannelId, channelError.UsingKey, errorMessage)
 	if isInsufficientBalance {
