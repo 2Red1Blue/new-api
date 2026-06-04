@@ -35,6 +35,7 @@ import (
 
 const upstreamInsufficientBalanceContextKey = "upstream_insufficient_balance_error"
 const channelRateLimitedContextKey = "channel_rate_limited_error"
+const perRequestChannelFailureLimit = 4
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
@@ -102,6 +103,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer != nil && c.Writer.Written() {
+				logger.LogWarn(c, "relay error response skipped: downstream response already written")
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -196,6 +201,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		ModelName:  relayInfo.OriginModelName,
 		Retry:      common.GetPointer(0),
 		Excluded:   make(map[int]struct{}),
+		Failures:   make(map[int]int),
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
@@ -246,8 +252,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.LastError = newAPIError
 
 		isInsufficientBalance := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
-		if retryParam.Excluded != nil {
+		channelFailureCount := recordRequestChannelFailure(retryParam, channel.Id)
+		if shouldExcludeChannelForRequestFailure(channelFailureCount) && retryParam.Excluded != nil {
 			retryParam.Excluded[channel.Id] = struct{}{}
+			relayInfo.ChannelMeta = &relaycommon.ChannelMeta{}
+			retryParam.SetRetry(0)
+			retryParam.ResetRetryNextTry()
+			logger.LogInfo(c, fmt.Sprintf("channel #%d reached per-request failure threshold (%d), excluded for this request", channel.Id, channelFailureCount))
+		} else if channelFailureCount < perRequestChannelFailureLimit {
+			relayInfo.ChannelMeta = nil
+			retryParam.ResetRetryNextTry()
 		}
 
 		if isInsufficientBalance {
@@ -264,6 +278,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
+		recordFinalChannelAffinityFailure(c, newAPIError, retryParam)
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
@@ -292,6 +307,21 @@ func getAttemptedChannelIDs(c *gin.Context) map[int]struct{} {
 		}
 	}
 	return result
+}
+
+func recordRequestChannelFailure(retryParam *service.RetryParam, channelID int) int {
+	if retryParam == nil || channelID <= 0 {
+		return 0
+	}
+	if retryParam.Failures == nil {
+		retryParam.Failures = make(map[int]int)
+	}
+	retryParam.Failures[channelID]++
+	return retryParam.Failures[channelID]
+}
+
+func shouldExcludeChannelForRequestFailure(channelFailureCount int) bool {
+	return channelFailureCount >= perRequestChannelFailureLimit
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -353,6 +383,28 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
+	if retryParam != nil && retryParam.GetRetry() == 0 && len(retryParam.ExcludedChannelIDs()) > 0 {
+		group := info.TokenGroup
+		if group == "auto" {
+			if autoGroup := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); autoGroup != "" {
+				group = autoGroup
+			}
+		}
+		channel, err := service.GetFirstAvailableChannelAcrossPriorities(group, info.OriginModelName, retryParam.ExcludedChannelIDs())
+		if err != nil {
+			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（excluded retry）: %s", group, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if channel == nil {
+			return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（excluded retry）", group, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		service.SetChannelAffinityRealGroup(c, group)
+		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+		if newAPIError != nil {
+			return nil, newAPIError
+		}
+		logger.LogInfo(c, fmt.Sprintf("selected fallback channel #%d after excluding failed channels", channel.Id))
+		return channel, nil
+	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
@@ -379,6 +431,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		)
 	}
 
+	service.SetChannelAffinityRealGroup(c, selectGroup)
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
 	if newAPIError != nil {
 		return nil, newAPIError
@@ -408,10 +461,6 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, f
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) && !(isUnavailable && service.ShouldBreakChannelAffinityOnUnavailable(c)) {
 		return false
 	}
-	// 上游不可用（5xx）且配置了 BreakAffinityOnUnavailable，清除亲和性缓存，下次请求重新选渠道
-	if isUnavailable && service.ShouldSkipRetryAfterChannelAffinityFailure(c) && service.ShouldBreakChannelAffinityOnUnavailable(c) {
-		service.InvalidateChannelAffinity(c)
-	}
 	if types.IsChannelError(openaiErr) {
 		return true
 	}
@@ -428,6 +477,47 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, f
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+func recordFinalChannelAffinityFailure(c *gin.Context, openaiErr *types.NewAPIError, retryParam *service.RetryParam) {
+	if openaiErr == nil {
+		return
+	}
+	if !service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		logger.LogInfo(c, "channel affinity failure skip: affinity not active (SkipRetryOnFailure=false or no rule matched)")
+		return
+	}
+	code := openaiErr.StatusCode
+	if code == http.StatusTooManyRequests {
+		if service.ShouldBreakChannelAffinityOnRateLimit(c) {
+			logger.LogInfo(c, "channel affinity failure: rate limit, triggering HandleChannelAffinityFailure")
+			service.HandleChannelAffinityFailure(c, channelAffinityFailureExclusions(c, retryParam))
+		} else {
+			logger.LogInfo(c, "channel affinity failure skip: rate limit but BreakAffinityOnRateLimit=false")
+		}
+		return
+	}
+	if !service.ShouldBreakChannelAffinityOnUnavailable(c) {
+		logger.LogInfo(c, fmt.Sprintf("channel affinity failure skip: status=%d but BreakAffinityOnUnavailable=false", code))
+		return
+	}
+	isUnavailable := c.GetBool(upstreamInsufficientBalanceContextKey) || code >= 500 || code < 100 || code > 599
+	if !isUnavailable {
+		logger.LogInfo(c, fmt.Sprintf("channel affinity failure skip: status=%d not considered unavailable", code))
+		return
+	}
+	logger.LogInfo(c, fmt.Sprintf("channel affinity failure: status=%d unavailable, triggering HandleChannelAffinityFailure", code))
+	service.HandleChannelAffinityFailure(c, channelAffinityFailureExclusions(c, retryParam))
+}
+
+func channelAffinityFailureExclusions(c *gin.Context, retryParam *service.RetryParam) map[int]struct{} {
+	excluded := getAttemptedChannelIDs(c)
+	if retryParam != nil {
+		for channelID := range retryParam.Excluded {
+			excluded[channelID] = struct{}{}
+		}
+	}
+	return excluded
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {

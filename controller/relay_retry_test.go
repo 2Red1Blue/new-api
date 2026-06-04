@@ -21,6 +21,17 @@ func TestShouldRetryDoesNotTreatClearedRateLimitFlagAsUnavailable(t *testing.T) 
 	}
 }
 
+func TestShouldExcludeChannelForRequestFailureWaitsForThreshold(t *testing.T) {
+	for count := 1; count < perRequestChannelFailureLimit; count++ {
+		if shouldExcludeChannelForRequestFailure(count) {
+			t.Fatalf("failure count %d should not exclude before threshold %d", count, perRequestChannelFailureLimit)
+		}
+	}
+	if !shouldExcludeChannelForRequestFailure(perRequestChannelFailureLimit) {
+		t.Fatalf("failure count %d should exclude at threshold", perRequestChannelFailureLimit)
+	}
+}
+
 type testError string
 
 func (e testError) Error() string { return string(e) }

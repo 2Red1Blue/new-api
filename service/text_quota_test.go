@@ -9,11 +9,77 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestClearUntrustedCachedTokensAfterAffinitySwitch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("channel_affinity_original_channel_id", 1)
+	ctx.Set("channel_id", 2)
+
+	generalSetting := operation_setting.GetGeneralSetting()
+	original := generalSetting.IgnoreCachedTokensAfterAffinitySwitch
+	generalSetting.IgnoreCachedTokensAfterAffinitySwitch = true
+	t.Cleanup(func() {
+		generalSetting.IgnoreCachedTokensAfterAffinitySwitch = original
+	})
+
+	usage := &dto.Usage{
+		PromptTokens:         1000,
+		CompletionTokens:     10,
+		PromptCacheHitTokens: 300,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 200,
+		},
+		InputTokensDetails: &dto.InputTokenDetails{
+			CachedTokens: 100,
+		},
+	}
+
+	clearUntrustedCachedTokens(ctx, usage)
+
+	require.Zero(t, usage.PromptTokensDetails.CachedTokens)
+	require.Zero(t, usage.InputTokensDetails.CachedTokens)
+	require.Zero(t, usage.PromptCacheHitTokens)
+	require.True(t, ctx.GetBool("ignored_cached_tokens_after_affinity_switch"))
+}
+
+func TestClearUntrustedCachedTokensKeepsCacheWhenDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Set("channel_affinity_original_channel_id", 1)
+	ctx.Set("channel_id", 2)
+
+	generalSetting := operation_setting.GetGeneralSetting()
+	original := generalSetting.IgnoreCachedTokensAfterAffinitySwitch
+	generalSetting.IgnoreCachedTokensAfterAffinitySwitch = false
+	t.Cleanup(func() {
+		generalSetting.IgnoreCachedTokensAfterAffinitySwitch = original
+	})
+
+	usage := &dto.Usage{
+		PromptCacheHitTokens: 300,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 200,
+		},
+		InputTokensDetails: &dto.InputTokenDetails{
+			CachedTokens: 100,
+		},
+	}
+
+	clearUntrustedCachedTokens(ctx, usage)
+
+	require.Equal(t, 200, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 100, usage.InputTokensDetails.CachedTokens)
+	require.Equal(t, 300, usage.PromptCacheHitTokens)
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)

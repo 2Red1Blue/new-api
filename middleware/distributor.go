@@ -155,13 +155,15 @@ func Distribute() func(c *gin.Context) {
 						return
 					}
 				}
+				// 记录本次实际使用的真实分组，供亲和性绑定写入正确的 RealGroup
+				service.SetChannelAffinityRealGroup(c, selectGroup)
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
-			service.RecordChannelAffinity(c, channel.Id)
+			service.RecordChannelAffinityFromContext(c)
 		}
 	}
 }

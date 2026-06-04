@@ -11,6 +11,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -27,19 +29,34 @@ const (
 	ginKeyChannelAffinitySkipRetry        = "channel_affinity_skip_retry_on_failure"
 	ginKeyChannelAffinityBreakUnavailable = "channel_affinity_break_on_unavailable"
 	ginKeyChannelAffinityBreakRateLimit   = "channel_affinity_break_on_rate_limit"
+	// 当前请求实际选中的真实分组（auto 场景下不同于 meta.UsingGroup）
+	ginKeyChannelAffinityRealGroup         = "channel_affinity_real_group"
+	ginKeyChannelAffinityOriginalChannelID = "channel_affinity_original_channel_id"
 
-	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
+	// binding cache 升为 v2：值从 int 改为 ChannelAffinityBinding struct
+	channelAffinityCacheNamespace           = "new-api:channel_affinity:v2"
+	channelAffinityStateCacheNamespace      = "new-api:channel_affinity_state:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
+
+	// 连续失败 N 个请求后触发渠道迁移
+	channelAffinityFailThreshold = 4
+	// 同一当前绑定找不到替代渠道后的冷却时间，避免频繁查找
+	channelAffinityCooldownDuration = 2 * time.Minute
 )
 
 var (
 	channelAffinityCacheOnce sync.Once
-	channelAffinityCache     *cachex.HybridCache[int]
+	channelAffinityCache     *cachex.HybridCache[ChannelAffinityBinding]
+
+	channelAffinityStateCacheOnce sync.Once
+	channelAffinityStateCache     *cachex.HybridCache[ChannelAffinityState]
 
 	channelAffinityUsageCacheStatsOnce  sync.Once
 	channelAffinityUsageCacheStatsCache *cachex.HybridCache[ChannelAffinityUsageCacheCounters]
 
 	channelAffinityRegexCache sync.Map // map[string]*regexp.Regexp
+
+	channelAffinityStateLocks [64]sync.Mutex
 )
 
 type channelAffinityMeta struct {
@@ -58,6 +75,22 @@ type channelAffinityMeta struct {
 	UsingGroup       string
 	ModelName        string
 	RequestPath      string
+}
+
+// ChannelAffinityBinding 存储渠道亲和性绑定，包含渠道 ID 和实际选中的真实分组
+type ChannelAffinityBinding struct {
+	ChannelID int    `json:"channel_id"`
+	RealGroup string `json:"real_group"`
+}
+
+// ChannelAffinityState 记录渠道亲和性失败状态，用于跨请求迁移
+type ChannelAffinityState struct {
+	FailCount           int   `json:"fail_count"`
+	LastFailedChannelID int   `json:"last_failed_channel_id"`
+	CooldownUntil       int64 `json:"cooldown_until"`
+	LastSwitchAt        int64 `json:"last_switch_at"`
+	// 同一请求只记一次失败，防止单请求内多次重试污染跨请求计数
+	LastRequestID string `json:"last_request_id,omitempty"`
 }
 
 type ChannelAffinityStatsContext struct {
@@ -82,7 +115,7 @@ type ChannelAffinityCacheStats struct {
 	CacheAlgo     string         `json:"cache_algo"`
 }
 
-func getChannelAffinityCache() *cachex.HybridCache[int] {
+func getChannelAffinityCache() *cachex.HybridCache[ChannelAffinityBinding] {
 	channelAffinityCacheOnce.Do(func() {
 		setting := operation_setting.GetChannelAffinitySetting()
 		capacity := setting.MaxEntries
@@ -94,15 +127,15 @@ func getChannelAffinityCache() *cachex.HybridCache[int] {
 			defaultTTLSeconds = 3600
 		}
 
-		channelAffinityCache = cachex.NewHybridCache[int](cachex.HybridCacheConfig[int]{
+		channelAffinityCache = cachex.NewHybridCache[ChannelAffinityBinding](cachex.HybridCacheConfig[ChannelAffinityBinding]{
 			Namespace: cachex.Namespace(channelAffinityCacheNamespace),
 			Redis:     common.RDB,
 			RedisEnabled: func() bool {
 				return common.RedisEnabled && common.RDB != nil
 			},
-			RedisCodec: cachex.IntCodec{},
-			Memory: func() *hot.HotCache[string, int] {
-				return hot.NewHotCache[string, int](hot.LRU, capacity).
+			RedisCodec: cachex.JSONCodec[ChannelAffinityBinding]{},
+			Memory: func() *hot.HotCache[string, ChannelAffinityBinding] {
+				return hot.NewHotCache[string, ChannelAffinityBinding](hot.LRU, capacity).
 					WithTTL(time.Duration(defaultTTLSeconds) * time.Second).
 					WithJanitor().
 					Build()
@@ -110,6 +143,36 @@ func getChannelAffinityCache() *cachex.HybridCache[int] {
 		})
 	})
 	return channelAffinityCache
+}
+
+func getChannelAffinityStateCache() *cachex.HybridCache[ChannelAffinityState] {
+	channelAffinityStateCacheOnce.Do(func() {
+		setting := operation_setting.GetChannelAffinitySetting()
+		capacity := setting.MaxEntries
+		if capacity <= 0 {
+			capacity = 100_000
+		}
+		defaultTTLSeconds := setting.DefaultTTLSeconds
+		if defaultTTLSeconds <= 0 {
+			defaultTTLSeconds = 3600
+		}
+
+		channelAffinityStateCache = cachex.NewHybridCache[ChannelAffinityState](cachex.HybridCacheConfig[ChannelAffinityState]{
+			Namespace: cachex.Namespace(channelAffinityStateCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[ChannelAffinityState]{},
+			Memory: func() *hot.HotCache[string, ChannelAffinityState] {
+				return hot.NewHotCache[string, ChannelAffinityState](hot.LRU, capacity).
+					WithTTL(time.Duration(defaultTTLSeconds) * time.Second).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return channelAffinityStateCache
 }
 
 func GetChannelAffinityCacheStats() ChannelAffinityCacheStats {
@@ -357,6 +420,15 @@ func setChannelAffinityContext(c *gin.Context, meta channelAffinityMeta) {
 	c.Set(ginKeyChannelAffinityCacheKey, meta.CacheKey)
 	c.Set(ginKeyChannelAffinityTTLSeconds, meta.TTLSeconds)
 	c.Set(ginKeyChannelAffinityMeta, meta)
+}
+
+// SetChannelAffinityRealGroup 更新 context 中记录的真实选中分组。
+// 在非亲和命中路径（随机选渠道后）调用，确保 RecordChannelAffinity 能写入正确的 RealGroup。
+func SetChannelAffinityRealGroup(c *gin.Context, realGroup string) {
+	if c == nil || realGroup == "" {
+		return
+	}
+	c.Set(ginKeyChannelAffinityRealGroup, realGroup)
 }
 
 func getChannelAffinityContext(c *gin.Context) (string, int, bool) {
@@ -616,13 +688,17 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		})
 
 		cache := getChannelAffinityCache()
-		channelID, found, err := cache.Get(cacheKeySuffix)
+		binding, found, err := cache.Get(cacheKeySuffix)
 		if err != nil {
 			common.SysError(fmt.Sprintf("channel affinity cache get failed: key=%s, err=%v", cacheKeyFull, err))
 			return 0, false
 		}
 		if found {
-			return channelID, true
+			// 把缓存中的真实分组写入 context，供后续迁移使用
+			if binding.RealGroup != "" {
+				c.Set(ginKeyChannelAffinityRealGroup, binding.RealGroup)
+			}
+			return binding.ChannelID, true
 		}
 		return 0, false
 	}
@@ -691,6 +767,13 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 	if !ok {
 		return
 	}
+	// 记录本次实际选中的真实分组，供 RecordChannelAffinity 和迁移逻辑使用
+	if selectedGroup != "" {
+		c.Set(ginKeyChannelAffinityRealGroup, selectedGroup)
+	}
+	if _, exists := c.Get(ginKeyChannelAffinityOriginalChannelID); !exists {
+		c.Set(ginKeyChannelAffinityOriginalChannelID, channelID)
+	}
 	c.Set(ginKeyChannelAffinitySkipRetry, meta.SkipRetry)
 	c.Set(ginKeyChannelAffinityBreakUnavailable, meta.BreakUnavailable)
 	c.Set(ginKeyChannelAffinityBreakRateLimit, meta.BreakRateLimit)
@@ -712,6 +795,18 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 		"break_on_rate_limit":   meta.BreakRateLimit,
 	}
 	c.Set(ginKeyChannelAffinityLogInfo, info)
+}
+
+func ShouldIgnoreCachedTokensAfterAffinitySwitch(c *gin.Context) bool {
+	if c == nil || !operation_setting.IgnoreCachedTokensAfterAffinitySwitch() {
+		return false
+	}
+	originalChannelID := c.GetInt(ginKeyChannelAffinityOriginalChannelID)
+	if originalChannelID <= 0 {
+		return false
+	}
+	currentChannelID := c.GetInt("channel_id")
+	return currentChannelID > 0 && currentChannelID != originalChannelID
 }
 
 func AppendChannelAffinityAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
@@ -748,10 +843,183 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	if ttlSeconds <= 0 {
 		ttlSeconds = 3600
 	}
+
+	// 从 context 读取本次请求实际选中的真实分组
+	realGroup := ""
+	if c != nil {
+		if v, ok := c.Get(ginKeyChannelAffinityRealGroup); ok {
+			realGroup, _ = v.(string)
+		}
+	}
+	// 兜底：若 context 里没有真实分组（非 auto 场景），从 meta 读 UsingGroup
+	if realGroup == "" {
+		if meta, ok := getChannelAffinityMeta(c); ok {
+			realGroup = meta.UsingGroup
+		}
+	}
+
 	cache := getChannelAffinityCache()
-	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
+	binding := ChannelAffinityBinding{ChannelID: channelID, RealGroup: realGroup}
+	if err := cache.SetWithTTL(cacheKey, binding, time.Duration(ttlSeconds)*time.Second); err != nil {
 		common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
 	}
+	// 成功时清除失败状态，重置计数器
+	stateCache := getChannelAffinityStateCache()
+	if _, err := stateCache.DeleteMany([]string{cacheKey}); err != nil {
+		common.SysError(fmt.Sprintf("channel affinity state cache reset failed: key=%s, err=%v", cacheKey, err))
+	}
+}
+
+func RecordChannelAffinityFromContext(c *gin.Context) {
+	channelID := c.GetInt("channel_id")
+	RecordChannelAffinity(c, channelID)
+}
+
+func channelAffinityStateLock(cacheKey string) *sync.Mutex {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(cacheKey))
+	idx := h.Sum32() % uint32(len(channelAffinityStateLocks))
+	return &channelAffinityStateLocks[idx]
+}
+
+// getFirstAvailableChannelAcrossPriorities 从最高优先级开始逐层遍历，
+// 排除 excludedChannelIDs，返回第一个可用渠道（跨优先级层寻找降级渠道）。
+func getFirstAvailableChannelAcrossPriorities(group, modelName string, excludedChannelIDs map[int]struct{}) *model.Channel {
+	ch, lastErr := GetFirstAvailableChannelAcrossPriorities(group, modelName, excludedChannelIDs)
+	if lastErr != nil {
+		common.SysLog(fmt.Sprintf("channel affinity: getFirstAvailableChannelAcrossPriorities group=%s model=%s err=%v", group, modelName, lastErr))
+	}
+	return ch
+}
+
+func getFirstAvailableChannelFromGroups(groups []string, modelName string, excludedChannelIDs map[int]struct{}) (*model.Channel, string) {
+	seen := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		channel := getFirstAvailableChannelAcrossPriorities(group, modelName, excludedChannelIDs)
+		if channel != nil && channel.Id > 0 {
+			return channel, group
+		}
+	}
+	return nil, ""
+}
+
+// HandleChannelAffinityFailure 处理渠道 5xx 失败：同一请求只记一次，累积到阈值且冷却期已过时迁移到新渠道
+// extraExcluded 为本次请求已尝试过（失败过）的渠道集合，迁移时一并排除
+func HandleChannelAffinityFailure(c *gin.Context, extraExcluded map[int]struct{}) {
+	cacheKey, ttlSeconds, ok := getChannelAffinityContext(c)
+	if !ok || cacheKey == "" {
+		return
+	}
+	setting := operation_setting.GetChannelAffinitySetting()
+	if setting == nil || !setting.Enabled {
+		return
+	}
+
+	mu := channelAffinityStateLock(cacheKey)
+	mu.Lock()
+	defer mu.Unlock()
+
+	stateCache := getChannelAffinityStateCache()
+	bindingCache := getChannelAffinityCache()
+
+	state, _, _ := stateCache.Get(cacheKey)
+	oldBinding, _, _ := bindingCache.Get(cacheKey)
+
+	// 同一请求只贡献一次失败计数，防止单请求内多次重试污染跨请求计数
+	currentRequestID := c.GetString(common.RequestIdKey)
+	if currentRequestID != "" && state.LastRequestID == currentRequestID {
+		logger.LogInfo(c, fmt.Sprintf("channel affinity: skip dup failure count, key=%s reqID=%s", cacheKey, currentRequestID))
+		return
+	}
+	state.FailCount++
+	state.LastRequestID = currentRequestID
+	logger.LogInfo(c, fmt.Sprintf("channel affinity: failure recorded key=%s failCount=%d threshold=%d boundChannel=%d",
+		cacheKey, state.FailCount, channelAffinityFailThreshold, oldBinding.ChannelID))
+
+	now := time.Now().Unix()
+	stateTTL := time.Duration(ttlSeconds) * time.Second
+
+	// 未达到阈值，或者同一当前绑定仍在冷却期内，仅持久化计数。
+	// 若绑定已从 A 迁移到 B，B 的连续失败不受 A 的冷却期限制。
+	if state.FailCount < channelAffinityFailThreshold || (now < state.CooldownUntil && state.LastFailedChannelID == oldBinding.ChannelID) {
+		if state.FailCount < channelAffinityFailThreshold {
+			logger.LogInfo(c, fmt.Sprintf("channel affinity: below threshold (%d/%d), key=%s", state.FailCount, channelAffinityFailThreshold, cacheKey))
+		} else {
+			logger.LogInfo(c, fmt.Sprintf("channel affinity: in cooldown until=%d now=%d lastFailed=%d bound=%d, key=%s",
+				state.CooldownUntil, now, state.LastFailedChannelID, oldBinding.ChannelID, cacheKey))
+		}
+		if err := stateCache.SetWithTTL(cacheKey, state, stateTTL); err != nil {
+			common.SysError(fmt.Sprintf("channel affinity state cache set failed: key=%s, err=%v", cacheKey, err))
+		}
+		return
+	}
+
+	// 达到阈值且冷却期已过：构建排除集，合并旧亲和渠道和本次请求失败过的渠道
+	excluded := make(map[int]struct{})
+	if oldBinding.ChannelID > 0 {
+		excluded[oldBinding.ChannelID] = struct{}{}
+	}
+	for id := range extraExcluded {
+		excluded[id] = struct{}{}
+	}
+	logger.LogInfo(c, fmt.Sprintf("channel affinity: threshold reached, attempting migration key=%s excluded=%v", cacheKey, excluded))
+
+	// 优先使用当前请求解析出的真实分组；binding 中的 RealGroup 可能因 auto-group 配置变化而过期。
+	var candidateGroups []string
+	if c != nil {
+		if v, ok := c.Get(ginKeyChannelAffinityRealGroup); ok {
+			if realGroup, _ := v.(string); realGroup != "" {
+				candidateGroups = append(candidateGroups, realGroup)
+			}
+		}
+	}
+	modelName := ""
+	if meta, ok := getChannelAffinityMeta(c); ok {
+		modelName = meta.ModelName
+		candidateGroups = append(candidateGroups, meta.UsingGroup)
+	}
+	candidateGroups = append(candidateGroups, oldBinding.RealGroup)
+
+	// 遍历所有优先级寻找替代渠道
+	newChannel, realGroup := getFirstAvailableChannelFromGroups(candidateGroups, modelName, excluded)
+	if newChannel == nil || newChannel.Id <= 0 {
+		// 找不到替代渠道，仅更新冷却期避免频繁触发
+		logger.LogInfo(c, fmt.Sprintf("channel affinity: no alternative channel found, candidateGroups=%v model=%s excluded=%v key=%s",
+			candidateGroups, modelName, excluded, cacheKey))
+		state.CooldownUntil = now + int64(channelAffinityCooldownDuration.Seconds())
+		state.LastFailedChannelID = oldBinding.ChannelID
+		if err := stateCache.SetWithTTL(cacheKey, state, stateTTL); err != nil {
+			common.SysError(fmt.Sprintf("channel affinity state cache set failed: key=%s, err=%v", cacheKey, err))
+		}
+		return
+	}
+
+	// 写入新渠道绑定（RealGroup 沿用当前真实分组）
+	newBinding := ChannelAffinityBinding{ChannelID: newChannel.Id, RealGroup: realGroup}
+	if err := bindingCache.SetWithTTL(cacheKey, newBinding, time.Duration(ttlSeconds)*time.Second); err != nil {
+		common.SysError(fmt.Sprintf("channel affinity binding cache migrate failed: key=%s, err=%v", cacheKey, err))
+		return
+	}
+
+	// 重置状态并写入冷却期
+	newState := ChannelAffinityState{
+		FailCount:           0,
+		LastFailedChannelID: oldBinding.ChannelID,
+		CooldownUntil:       now + int64(channelAffinityCooldownDuration.Seconds()),
+		LastSwitchAt:        now,
+	}
+	if err := stateCache.SetWithTTL(cacheKey, newState, stateTTL); err != nil {
+		common.SysError(fmt.Sprintf("channel affinity state cache set failed: key=%s, err=%v", cacheKey, err))
+	}
+	common.SysLog(fmt.Sprintf("channel affinity migrated: key=%s old=%d new=%d group=%s", cacheKey, oldBinding.ChannelID, newChannel.Id, realGroup))
 }
 
 // InvalidateChannelAffinity 清除当前请求的渠道亲和性缓存，使下次请求重新选渠道

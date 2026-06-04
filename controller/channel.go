@@ -1,14 +1,12 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"strconv"
 	"strings"
 	"time"
@@ -69,11 +67,6 @@ type UpstreamGroupRatiosPreviewRequest struct {
 	Key              string `json:"key"`
 	UpstreamAccount  string `json:"upstream_account"`
 	UpstreamPassword string `json:"upstream_password"`
-}
-
-type upstreamPricingCredential struct {
-	Account  string
-	Password string
 }
 
 func parseStatusFilter(statusParam string) int {
@@ -314,8 +307,8 @@ func FetchChannelUpstreamGroupRatios(c *gin.Context) {
 		return
 	}
 
-	credential := upstreamCredentialFromProfile(channel.Id)
-	fetchAndWriteUpstreamGroupRatios(c, strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/"), credential)
+	credential, credentialErr := upstreamCredentialFromProfile(channel.Id)
+	fetchAndWriteUpstreamGroupRatios(c, strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/"), credential, credentialErr)
 }
 
 func PreviewChannelUpstreamGroupRatios(c *gin.Context) {
@@ -331,13 +324,13 @@ func PreviewChannelUpstreamGroupRatios(c *gin.Context) {
 	if baseURL == "" && req.Type > 0 {
 		baseURL = strings.TrimRight(strings.TrimSpace(constant.ChannelBaseURLs[req.Type]), "/")
 	}
-	fetchAndWriteUpstreamGroupRatios(c, baseURL, &upstreamPricingCredential{
+	fetchAndWriteUpstreamGroupRatios(c, baseURL, &service.UpstreamPricingCredential{
 		Account:  strings.TrimSpace(req.UpstreamAccount),
 		Password: strings.TrimSpace(req.UpstreamPassword),
-	})
+	}, nil)
 }
 
-func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string, credential *upstreamPricingCredential) {
+func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string, credential *service.UpstreamPricingCredential, credentialErr error) {
 	if baseURL == "" || !strings.HasPrefix(baseURL, "http") {
 		common.ApiErrorMsg(c, "当前渠道没有有效的上游地址")
 		return
@@ -351,16 +344,19 @@ func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string, credential
 		GroupRatios: map[string]float64{},
 	}
 	var messages []string
+	if credentialErr != nil {
+		messages = append(messages, credentialErr.Error())
+	}
 
-	if ratios, raw, source, err := fetchUpstreamGroupRatios(ctx, client, baseURL, credential); err == nil {
-		result.GroupRatios = ratios
-		result.GroupRatiosRaw = raw
-		result.Source = source
+	if fetched, err := service.FetchUpstreamGroupRatios(ctx, client, baseURL, credential); err == nil {
+		result.GroupRatios = fetched.Ratios
+		result.GroupRatiosRaw = fetched.Raw
+		result.Source = fetched.Source
 	} else {
 		messages = append(messages, "分组倍率获取失败: "+err.Error())
 	}
 
-	if topupRatio, ok, err := fetchUpstreamTopupRatio(ctx, client, baseURL); err == nil && ok {
+	if topupRatio, ok, err := service.FetchUpstreamTopupRatio(ctx, client, baseURL); err == nil && ok {
 		result.TopupRatio = topupRatio
 		if result.Source == "" {
 			result.Source = baseURL + "/api/status"
@@ -377,241 +373,17 @@ func fetchAndWriteUpstreamGroupRatios(c *gin.Context, baseURL string, credential
 	common.ApiSuccess(c, result)
 }
 
-func upstreamCredentialFromProfile(channelId int) *upstreamPricingCredential {
+func upstreamCredentialFromProfile(channelId int) (*service.UpstreamPricingCredential, error) {
 	profile, err := model.GetChannelUpstreamProfileByChannelId(channelId)
 	if err != nil || profile == nil {
-		return nil
+		return nil, nil
 	}
-	account := strings.TrimSpace(profile.UpstreamAccount)
-	if account == "" || strings.TrimSpace(profile.UpstreamPasswordEnc) == "" {
-		return nil
+	credential := service.UpstreamCredentialFromProfileRecord(profile)
+	// account 非空但 credential 为 nil 说明解密失败，返回用户友好错误
+	if credential == nil && strings.TrimSpace(profile.UpstreamAccount) != "" {
+		return nil, fmt.Errorf("上游密码解密失败，请重新保存上游密码")
 	}
-	password, err := service.DecryptUpstreamPassword(profile.UpstreamPasswordEnc)
-	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to decrypt upstream password for channel #%d: %s", channelId, err.Error()))
-		return nil
-	}
-	return &upstreamPricingCredential{
-		Account:  account,
-		Password: password,
-	}
-}
-
-func fetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL string, credential *upstreamPricingCredential) (map[string]float64, string, string, error) {
-	ratios, raw, source, err := fetchUpstreamGroupRatiosWithClient(ctx, client, baseURL, "")
-	if err == nil {
-		return ratios, raw, source, nil
-	}
-	if credential == nil || strings.TrimSpace(credential.Account) == "" || strings.TrimSpace(credential.Password) == "" {
-		return nil, "", "", err
-	}
-	authClient, userID, loginErr := loginUpstreamForPricing(ctx, baseURL, credential)
-	if loginErr != nil {
-		return nil, "", "", fmt.Errorf("%w；登录上游获取价格失败: %v", err, loginErr)
-	}
-	ratios, raw, source, authErr := fetchUpstreamGroupRatiosWithClient(ctx, authClient, baseURL, userID)
-	if authErr != nil {
-		return nil, "", "", fmt.Errorf("%w；登录后获取价格失败: %v", err, authErr)
-	}
-	return ratios, raw, source, nil
-}
-
-func fetchUpstreamGroupRatiosWithClient(ctx context.Context, client *http.Client, baseURL string, userID string) (map[string]float64, string, string, error) {
-	endpoints := []string{"/api/ratio_config", "/api/pricing"}
-	var lastErr error
-	for _, endpoint := range endpoints {
-		source := baseURL + endpoint
-		body, err := fetchUpstreamJSONWithUser(ctx, client, source, userID)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		data := unwrapSuccessData(body)
-		ratios := extractFloatMapByKeys(body, "group_ratio", "group_ratios", "topup_group_ratio")
-		if len(ratios) == 0 {
-			ratios = extractFloatMapByKeys(data, "group_ratio", "group_ratios", "topup_group_ratio")
-		}
-		if len(ratios) == 0 {
-			lastErr = errors.New("上游未返回 group_ratio")
-			continue
-		}
-		rawBytes, err := common.MarshalIndent(ratios, "", "  ")
-		if err != nil {
-			return nil, "", "", err
-		}
-		return ratios, string(rawBytes), source, nil
-	}
-	if lastErr == nil {
-		lastErr = errors.New("上游未返回 group_ratio")
-	}
-	return nil, "", "", lastErr
-}
-
-func loginUpstreamForPricing(ctx context.Context, baseURL string, credential *upstreamPricingCredential) (*http.Client, string, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, "", err
-	}
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Jar:     jar,
-	}
-	payload := map[string]string{
-		"username": strings.TrimSpace(credential.Account),
-		"password": strings.TrimSpace(credential.Password),
-	}
-	bodyBytes, err := common.Marshal(payload)
-	if err != nil {
-		return nil, "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/user/login", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("上游登录返回 %s", resp.Status)
-	}
-	var response map[string]any
-	if err := common.DecodeJson(io.LimitReader(resp.Body, 1<<20), &response); err != nil {
-		return nil, "", err
-	}
-	success, _ := response["success"].(bool)
-	if !success {
-		message, _ := response["message"].(string)
-		if strings.TrimSpace(message) == "" {
-			message = "上游登录失败"
-		}
-		return nil, "", errors.New(message)
-	}
-	userID := findUserIDString(response["data"])
-	if userID == "" {
-		return nil, "", errors.New("上游登录未返回用户 ID")
-	}
-	return client, userID, nil
-}
-
-func findUserIDString(value any) string {
-	if record, ok := value.(map[string]any); ok {
-		for _, key := range []string{"id", "user_id", "uid"} {
-			if number, ok := asFloat64(record[key]); ok {
-				return strconv.FormatInt(int64(number), 10)
-			}
-			if str, ok := record[key].(string); ok && strings.TrimSpace(str) != "" {
-				return strings.TrimSpace(str)
-			}
-		}
-	}
-	return ""
-}
-
-func fetchUpstreamTopupRatio(ctx context.Context, client *http.Client, baseURL string) (float64, bool, error) {
-	body, err := fetchUpstreamJSON(ctx, client, baseURL+"/api/status")
-	if err != nil {
-		return 0, false, err
-	}
-	data := unwrapSuccessData(body)
-	if ratio, ok := findFloatByKeys(data, "topup_ratio", "top_up_ratio", "recharge_ratio", "upstream_topup_ratio"); ok && ratio > 0 {
-		return ratio, true, nil
-	}
-
-	price, priceOK := findFloatByKeys(data, "price")
-	quotaPerUnit, quotaOK := findFloatByKeys(data, "quota_per_unit")
-	if priceOK && quotaOK && price > 0 && quotaPerUnit > 0 {
-		return quotaPerUnit / common.QuotaPerUnit / price, true, nil
-	}
-	return 0, false, nil
-}
-
-func fetchUpstreamJSON(ctx context.Context, client *http.Client, url string) (map[string]any, error) {
-	return fetchUpstreamJSONWithUser(ctx, client, url, "")
-}
-
-func fetchUpstreamJSONWithUser(ctx context.Context, client *http.Client, url string, userID string) (map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(userID) != "" {
-		req.Header.Set("New-Api-User", strings.TrimSpace(userID))
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("上游返回 %s", resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return nil, err
-	}
-	var payload map[string]any
-	if err := common.DecodeJson(bytes.NewReader(body), &payload); err != nil {
-		return nil, err
-	}
-	return payload, nil
-}
-
-func unwrapSuccessData(payload map[string]any) any {
-	if data, ok := payload["data"]; ok {
-		return data
-	}
-	return payload
-}
-
-func extractFloatMapByKeys(value any, keys ...string) map[string]float64 {
-	if record, ok := value.(map[string]any); ok {
-		for _, key := range keys {
-			if ratios := convertFloatMap(record[key]); len(ratios) > 0 {
-				return ratios
-			}
-		}
-		for _, nestedKey := range []string{"data", "ratio_config", "ratios"} {
-			if ratios := extractFloatMapByKeys(record[nestedKey], keys...); len(ratios) > 0 {
-				return ratios
-			}
-		}
-	}
-	return nil
-}
-
-func convertFloatMap(value any) map[string]float64 {
-	record, ok := value.(map[string]any)
-	if !ok {
-		return nil
-	}
-	result := make(map[string]float64, len(record))
-	for key, raw := range record {
-		if ratio, ok := asFloat64(raw); ok {
-			result[key] = ratio
-		}
-	}
-	return result
-}
-
-func findFloatByKeys(value any, keys ...string) (float64, bool) {
-	record, ok := value.(map[string]any)
-	if !ok {
-		return 0, false
-	}
-	for _, key := range keys {
-		if number, ok := asFloat64(record[key]); ok {
-			return number, true
-		}
-	}
-	for _, nestedKey := range []string{"data", "status", "payment", "config"} {
-		if number, ok := findFloatByKeys(record[nestedKey], keys...); ok {
-			return number, true
-		}
-	}
-	return 0, false
+	return credential, nil
 }
 
 func FixChannelsAbilities(c *gin.Context) {
@@ -1693,9 +1465,39 @@ func CopyChannel(c *gin.Context) {
 		clone.UsedQuota = 0
 	}
 
-	// insert
-	if err := clone.Insert(); err != nil {
+	now := clone.CreatedTime
+	tx := model.DB.Begin()
+	if tx.Error != nil {
+		common.SysError("failed to begin clone channel transaction: " + tx.Error.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	if err := tx.Create(&clone).Error; err != nil {
+		tx.Rollback()
 		common.SysError("failed to clone channel: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
+		return
+	}
+	if err := clone.AddAbilities(tx); err != nil {
+		tx.Rollback()
+		common.SysError("failed to clone channel abilities: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
+		return
+	}
+	if err := model.CloneChannelUpstreamProfiles(tx, origin.Id, clone.Id, now); err != nil {
+		tx.Rollback()
+		common.SysError("failed to clone channel upstream profiles: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
+		return
+	}
+	if err := tx.Commit().Error; err != nil {
+		common.SysError("failed to commit clone channel transaction: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
 		return
 	}

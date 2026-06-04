@@ -401,6 +401,7 @@ export interface FetchUpstreamGroupRatiosPreviewParams {
 
 export type UpdateChannelRequest = Omit<Partial<Channel>, 'upstream_profile'> & {
   upstream_profile?: ChannelUpstreamProfilePayload
+  key_mode?: 'append' | 'replace'
 }
 
 // ============================================================================

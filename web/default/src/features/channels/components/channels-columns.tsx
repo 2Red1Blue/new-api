@@ -580,8 +580,13 @@ function BalanceCell({ channel }: { channel: Channel }) {
 /**
  * Generate channels columns configuration
  */
-export function useChannelsColumns(): ColumnDef<Channel>[] {
+export function useChannelsColumns(params?: {
+  activeGroup?: string | null
+  onGroupClick?: (group: string) => void
+}): ColumnDef<Channel>[] {
   const { t } = useTranslation()
+  const activeGroup = params?.activeGroup?.trim() || ''
+  const handleGroupClick = params?.onGroupClick
   return [
     // Checkbox column
     {
@@ -1039,7 +1044,26 @@ export function useChannelsColumns(): ColumnDef<Channel>[] {
         const groupArray = parseGroupsList(group)
 
         const groupBadges = groupArray.map((g) => (
-          <GroupBadge key={g} group={g} size='sm' />
+          <button
+            key={g}
+            type='button'
+            className='rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+            onClick={(event) => {
+              event.stopPropagation()
+              handleGroupClick?.(g)
+            }}
+            title={t('Filter by {{group}}', { group: g })}
+          >
+            <GroupBadge
+              group={g}
+              size='sm'
+              className={
+                activeGroup === g
+                  ? 'ring-2 ring-ring/60 ring-offset-1 ring-offset-background'
+                  : 'cursor-pointer hover:brightness-95'
+              }
+            />
+          </button>
         ))
 
         return (

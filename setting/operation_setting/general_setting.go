@@ -14,6 +14,9 @@ type GeneralSetting struct {
 	DocsLink            string `json:"docs_link"`
 	PingIntervalEnabled bool   `json:"ping_interval_enabled"`
 	PingIntervalSeconds int    `json:"ping_interval_seconds"`
+	// When a sticky channel fails and retry succeeds on a different channel,
+	// cached token usage may no longer represent the actual upstream cache cost.
+	IgnoreCachedTokensAfterAffinitySwitch bool `json:"ignore_cached_tokens_after_affinity_switch"`
 	// 当前站点额度展示类型：USD / CNY / TOKENS
 	QuotaDisplayType string `json:"quota_display_type"`
 	// 自定义货币符号，用于 CUSTOM 展示类型
@@ -24,12 +27,13 @@ type GeneralSetting struct {
 
 // 默认配置
 var generalSetting = GeneralSetting{
-	DocsLink:                   "https://docs.newapi.pro",
-	PingIntervalEnabled:        false,
-	PingIntervalSeconds:        60,
-	QuotaDisplayType:           QuotaDisplayTypeUSD,
-	CustomCurrencySymbol:       "¤",
-	CustomCurrencyExchangeRate: 1.0,
+	DocsLink:                              "https://docs.newapi.pro",
+	PingIntervalEnabled:                   false,
+	PingIntervalSeconds:                   60,
+	IgnoreCachedTokensAfterAffinitySwitch: false,
+	QuotaDisplayType:                      QuotaDisplayTypeUSD,
+	CustomCurrencySymbol:                  "¤",
+	CustomCurrencyExchangeRate:            1.0,
 }
 
 func init() {
@@ -39,6 +43,10 @@ func init() {
 
 func GetGeneralSetting() *GeneralSetting {
 	return &generalSetting
+}
+
+func IgnoreCachedTokensAfterAffinitySwitch() bool {
+	return generalSetting.IgnoreCachedTokensAfterAffinitySwitch
 }
 
 // IsCurrencyDisplay 是否以货币形式展示（美元或人民币）

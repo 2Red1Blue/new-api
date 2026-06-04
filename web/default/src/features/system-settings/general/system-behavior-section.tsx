@@ -47,6 +47,7 @@ const behaviorSchema = z.object({
   DefaultCollapseSidebar: z.boolean(),
   DemoSiteEnabled: z.boolean(),
   SelfUseModeEnabled: z.boolean(),
+  'general_setting.ignore_cached_tokens_after_affinity_switch': z.boolean(),
 })
 
 type BehaviorFormValues = z.infer<typeof behaviorSchema>
@@ -159,6 +160,29 @@ export function SystemBehaviorSection({
                   <FormLabel>{t('Self-Use Mode')}</FormLabel>
                   <FormDescription>
                     {t('Optimize system for self-hosted single-user usage')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='general_setting.ignore_cached_tokens_after_affinity_switch'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Ignore Switched Channel Cache')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'When sticky routing retries on a different channel, ignore cached tokens returned by that channel for billing'
+                    )}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>

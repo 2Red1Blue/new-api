@@ -145,6 +145,8 @@ export function ChannelsTable() {
   }, [debouncedModelFilter, modelFilterFromUrl, onColumnFiltersChange])
 
   const modelFilter = modelFilterFromUrl
+  const activeGroupFilter =
+    groupFilter.length > 0 && !groupFilter.includes('all') ? groupFilter[0] : ''
 
   // Determine whether to use search or regular list API
   const shouldSearch = Boolean(globalFilter?.trim() || modelFilter.trim())
@@ -276,7 +278,20 @@ export function ChannelsTable() {
   const typeCounts = data?.data?.type_counts
 
   // Columns configuration
-  const columns = useChannelsColumns()
+  const handleGroupBadgeClick = (group: string) => {
+    onColumnFiltersChange((prev) => {
+      const filtered = prev.filter((f) => f.id !== 'group')
+      return [...filtered, { id: 'group', value: [group] }]
+    })
+    if (pagination.pageIndex > 0) {
+      onPaginationChange({ ...pagination, pageIndex: 0 })
+    }
+  }
+
+  const columns = useChannelsColumns({
+    activeGroup: activeGroupFilter,
+    onGroupClick: handleGroupBadgeClick,
+  })
 
   // React Table instance
   const table = useReactTable({

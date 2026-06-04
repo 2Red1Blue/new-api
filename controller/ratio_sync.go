@@ -19,6 +19,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
@@ -995,11 +996,14 @@ func fetchAuthenticatedUpstreamBody(ctx context.Context, baseURL string, fullURL
 	if channelID == 0 {
 		return nil, errors.New("channel id is required for authenticated upstream fetch")
 	}
-	credential := upstreamCredentialFromProfile(channelID)
+	credential, credentialErr := upstreamCredentialFromProfile(channelID)
+	if credentialErr != nil {
+		return nil, credentialErr
+	}
 	if credential == nil {
 		return nil, errors.New("upstream credential is not configured")
 	}
-	client, userID, err := loginUpstreamForPricing(ctx, baseURL, credential)
+	client, userID, err := service.LoginUpstreamLegacy(ctx, baseURL, credential)
 	if err != nil {
 		return nil, err
 	}

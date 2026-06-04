@@ -311,6 +311,8 @@
     "上次保存: ": "Last saved: ",
     "上次检测到可加入模型": "",
     "上次检测时间": "",
+    "上次自动优先级执行时间": "Last auto-priority execution time",
+    "上次自动优先级执行结果": "Last auto-priority execution result",
     "上游倍率同步": "Upstream ratio synchronization",
     "上游模型管理": "Upstream Model Management",
     "上游返回": "Upstream response",

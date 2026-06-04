@@ -20,6 +20,37 @@ func TestStreamStatus_SetEndReason_FirstWins(t *testing.T) {
 	assert.Nil(t, s.EndError)
 }
 
+func TestStreamStatus_SetEndReason_DonePromotesTransportEnd(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []StreamEndReason{StreamEndReasonEOF, StreamEndReasonClientGone} {
+		s := NewStreamStatus()
+		s.SetEndReason(reason, fmt.Errorf("context canceled"))
+		s.SetEndReason(StreamEndReasonDone, nil)
+
+		assert.Equal(t, StreamEndReasonDone, s.EndReason)
+		assert.Nil(t, s.EndError)
+	}
+}
+
+func TestStreamStatus_SetEndReason_DoneDoesNotPromoteOperationalError(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []StreamEndReason{
+		StreamEndReasonTimeout,
+		StreamEndReasonScannerErr,
+		StreamEndReasonHandlerStop,
+		StreamEndReasonPanic,
+		StreamEndReasonPingFail,
+	} {
+		s := NewStreamStatus()
+		err := fmt.Errorf("stream failed")
+		s.SetEndReason(reason, err)
+		s.SetEndReason(StreamEndReasonDone, nil)
+
+		assert.Equal(t, reason, s.EndReason)
+		assert.Equal(t, err, s.EndError)
+	}
+}
+
 func TestStreamStatus_SetEndReason_WithError(t *testing.T) {
 	t.Parallel()
 	s := NewStreamStatus()

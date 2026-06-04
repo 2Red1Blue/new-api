@@ -17,6 +17,7 @@ type RetryParam struct {
 	ModelName    string
 	Retry        *int
 	Excluded     map[int]struct{}
+	Failures     map[int]int
 	resetNextTry bool
 }
 
@@ -51,6 +52,25 @@ func (p *RetryParam) ExcludedChannelIDs() map[int]struct{} {
 		return nil
 	}
 	return p.Excluded
+}
+
+func GetFirstAvailableChannelAcrossPriorities(group, modelName string, excludedChannelIDs map[int]struct{}) (*model.Channel, error) {
+	levelCount := model.GetChannelPriorityLevelCount(group, modelName)
+	if levelCount <= 0 {
+		return nil, nil
+	}
+	var lastErr error
+	for retry := 0; retry < levelCount; retry++ {
+		ch, err := model.GetRandomSatisfiedChannelWithExclusions(group, modelName, retry, excludedChannelIDs)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if ch != nil {
+			return ch, nil
+		}
+	}
+	return nil, lastErr
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.

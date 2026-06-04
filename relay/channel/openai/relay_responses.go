@@ -78,6 +78,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var streamErr *types.NewAPIError
+	var pendingEvents []responsesStreamEvent
+	forwarded := false
+
+	flushPendingEvents := func() {
+		for _, event := range pendingEvents {
+			sendResponsesStreamData(c, event.response, event.data)
+			forwarded = true
+		}
+		pendingEvents = nil
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -88,7 +99,26 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		if isResponsesStreamFailureEvent(streamResponse.Type) {
+			streamErr = responsesStreamFailureError(streamResponse)
+			if forwarded || responseWriterStarted(c) {
+				flushPendingEvents()
+				sendResponsesStreamData(c, streamResponse, data)
+				streamErr = types.WithOpenAIError(streamErr.ToOpenAIError(), streamErr.StatusCode, types.ErrOptionWithSkipRetry())
+			}
+			sr.Stop(streamErr)
+			return
+		}
+		if !forwarded && isResponsesStreamEarlyLifecycleEvent(streamResponse.Type) {
+			pendingEvents = append(pendingEvents, responsesStreamEvent{
+				response: streamResponse,
+				data:     data,
+			})
+			return
+		}
+		flushPendingEvents()
 		sendResponsesStreamData(c, streamResponse, data)
+		forwarded = true
 		switch streamResponse.Type {
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -112,6 +142,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
+			sr.Done()
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)
@@ -130,6 +161,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 	})
 
+	if streamErr != nil {
+		return nil, streamErr
+	}
+	flushPendingEvents()
+
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
 		tempStr := responseTextBuilder.String()
@@ -147,4 +183,30 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+type responsesStreamEvent struct {
+	response dto.ResponsesStreamResponse
+	data     string
+}
+
+func isResponsesStreamFailureEvent(eventType string) bool {
+	return eventType == "response.error" || eventType == "response.failed"
+}
+
+func isResponsesStreamEarlyLifecycleEvent(eventType string) bool {
+	return eventType == "response.created" || eventType == "response.in_progress"
+}
+
+func responsesStreamFailureError(streamResponse dto.ResponsesStreamResponse) *types.NewAPIError {
+	if streamResponse.Response != nil {
+		if oaiErr := streamResponse.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
+			return types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+		}
+	}
+	return types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+}
+
+func responseWriterStarted(c *gin.Context) bool {
+	return c != nil && c.Writer != nil && c.Writer.Written()
 }

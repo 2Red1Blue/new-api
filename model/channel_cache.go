@@ -201,6 +201,31 @@ func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry i
 	return nil, errors.New("channel not found")
 }
 
+// GetChannelPriorityLevelCount 返回指定分组和模型的优先级层数，供亲和性迁移遍历使用
+func GetChannelPriorityLevelCount(group, modelName string) int {
+	if !common.MemoryCacheEnabled {
+		return 1 // DB 模式无法廉价计算，返回 1 表示只看最高优先级
+	}
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	channels := group2model2channels[group][modelName]
+	if len(channels) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		channels = group2model2channels[group][normalizedModel]
+		if len(channels) == 0 {
+			return 0
+		}
+	}
+	priorities := make(map[int]struct{})
+	for _, id := range channels {
+		if ch, ok := channelsIDM[id]; ok {
+			priorities[int(ch.GetPriority())] = struct{}{}
+		}
+	}
+	return len(priorities)
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)

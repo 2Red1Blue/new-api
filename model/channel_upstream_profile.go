@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 const DefaultInsufficientBalanceKeywords = "insufficient_quota\ninsufficient balance\nquota exceeded\nbilling hard limit\n余额不足\n额度不足\n剩余额度\n欠费\n账户余额\ncredit balance\naccount balance"
@@ -361,6 +362,35 @@ func GetChannelUpstreamProfilesByChannelIds(channelIds []int) (map[int]ChannelUp
 		result[profiles[i].ChannelId] = profiles[i].Summary()
 	}
 	return result, nil
+}
+
+func CloneChannelUpstreamProfiles(tx *gorm.DB, sourceChannelId int, targetChannelId int, now int64) error {
+	if tx == nil {
+		tx = DB
+	}
+
+	var profiles []ChannelUpstreamProfile
+	if err := tx.Where("channel_id = ?", sourceChannelId).Order("id ASC").Find(&profiles).Error; err != nil {
+		return err
+	}
+	if len(profiles) == 0 {
+		return nil
+	}
+
+	clones := make([]ChannelUpstreamProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		profile.Id = 0
+		profile.ChannelId = targetChannelId
+		profile.LastInsufficientAt = 0
+		profile.LastInsufficientReason = ""
+		profile.LastNotifiedAt = 0
+		profile.NotifySuppressUntil = 0
+		profile.CreatedAt = now
+		profile.UpdatedAt = now
+		clones = append(clones, profile)
+	}
+
+	return tx.Create(&clones).Error
 }
 
 func UpsertChannelUpstreamProfile(channel *Channel, input ChannelUpstreamProfileInput, passwordEnc string) (*ChannelUpstreamProfile, error) {

@@ -102,7 +102,7 @@ const RULES_JSON_PLACEHOLDER = `[
         { "path": "temperature", "mode": "set", "value": 0.2 }
       ]
     },
-    "skip_retry_on_failure": false,
+    "skip_retry_on_failure": true,
     "include_using_group": true,
     "include_model_name": false,
     "include_rule_name": true
@@ -684,7 +684,7 @@ export default function SettingsChannelAffinity(props) {
       key_sources: [{ type: 'gjson', path: '' }],
       value_regex: '',
       ttl_seconds: 0,
-      skip_retry_on_failure: false,
+      skip_retry_on_failure: true,
       include_using_group: true,
       include_model_name: false,
       include_rule_name: true,

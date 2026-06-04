@@ -37,6 +37,8 @@ const OPERATIONS_SECTIONS = [
           DefaultCollapseSidebar: settings.DefaultCollapseSidebar,
           DemoSiteEnabled: settings.DemoSiteEnabled,
           SelfUseModeEnabled: settings.SelfUseModeEnabled,
+          'general_setting.ignore_cached_tokens_after_affinity_switch':
+            settings['general_setting.ignore_cached_tokens_after_affinity_switch'],
         }}
       />
     ),

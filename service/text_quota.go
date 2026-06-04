@@ -57,6 +57,23 @@ type textQuotaSummary struct {
 	ToolCallSurchargeQuota   decimal.Decimal
 }
 
+func clearUntrustedCachedTokens(ctx *gin.Context, usage *dto.Usage) {
+	if usage == nil || !ShouldIgnoreCachedTokensAfterAffinitySwitch(ctx) {
+		return
+	}
+	if usage.PromptTokensDetails.CachedTokens == 0 &&
+		usage.PromptCacheHitTokens == 0 &&
+		(usage.InputTokensDetails == nil || usage.InputTokensDetails.CachedTokens == 0) {
+		return
+	}
+	usage.PromptTokensDetails.CachedTokens = 0
+	usage.PromptCacheHitTokens = 0
+	if usage.InputTokensDetails != nil {
+		usage.InputTokensDetails.CachedTokens = 0
+	}
+	common.SetContextKey(ctx, "ignored_cached_tokens_after_affinity_switch", true)
+}
+
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
 	if summary.CacheCreationTokens5m > 0 || summary.CacheCreationTokens1h > 0 {
 		splitCacheWriteTokens := summary.CacheCreationTokens5m + summary.CacheCreationTokens1h
@@ -324,6 +341,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
 	}
+	clearUntrustedCachedTokens(ctx, usage)
 	if originUsage != nil {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
 	}
@@ -457,6 +475,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
+	}
+	if common.GetContextKeyBool(ctx, "ignored_cached_tokens_after_affinity_switch") {
+		other["ignored_cached_tokens_after_affinity_switch"] = true
 	}
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
