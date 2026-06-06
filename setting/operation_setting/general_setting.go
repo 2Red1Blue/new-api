@@ -27,7 +27,7 @@ type GeneralSetting struct {
 
 // 默认配置
 var generalSetting = GeneralSetting{
-	DocsLink:                              "https://docs.newapi.pro",
+	DocsLink:                              "https://docs.laiber.cloud",
 	PingIntervalEnabled:                   false,
 	PingIntervalSeconds:                   60,
 	IgnoreCachedTokensAfterAffinitySwitch: false,
