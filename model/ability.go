@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -28,6 +29,23 @@ type AbilityWithChannel struct {
 	ChannelType int `json:"channel_type"`
 }
 
+type ModelCleanupMode string
+
+const (
+	ModelCleanupModeRemove  ModelCleanupMode = "remove"
+	ModelCleanupModeDisable ModelCleanupMode = "disable"
+)
+
+type ModelCleanupResult struct {
+	Models                   []string `json:"models"`
+	Mode                     string   `json:"mode"`
+	UpdatedChannels          int64    `json:"updated_channels"`
+	DeletedAbilities         int64    `json:"deleted_abilities,omitempty"`
+	DisabledAbilities        int64    `json:"disabled_abilities,omitempty"`
+	MatchedChannelIDs        []int    `json:"matched_channel_ids"`
+	MatchedAbilityChannelIDs []int    `json:"matched_ability_channel_ids"`
+}
+
 func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 	var abilities []AbilityWithChannel
 	err := DB.Table("abilities").
@@ -36,6 +54,150 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 		Where("abilities.enabled = ?", true).
 		Scan(&abilities).Error
 	return abilities, err
+}
+
+func NormalizeModelCleanupNames(models []string) []string {
+	modelSet := make(map[string]struct{}, len(models))
+	normalized := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, exists := modelSet[model]; exists {
+			continue
+		}
+		modelSet[model] = struct{}{}
+		normalized = append(normalized, model)
+	}
+	return normalized
+}
+
+func removeModelsFromCSV(raw string, targetModels map[string]struct{}) (string, bool) {
+	if strings.TrimSpace(raw) == "" || len(targetModels) == 0 {
+		return raw, false
+	}
+
+	parts := strings.Split(raw, ",")
+	next := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	changed := false
+	for _, part := range parts {
+		model := strings.TrimSpace(part)
+		if model == "" {
+			if part != "" {
+				changed = true
+			}
+			continue
+		}
+		if _, shouldRemove := targetModels[model]; shouldRemove {
+			changed = true
+			continue
+		}
+		if _, exists := seen[model]; exists {
+			changed = true
+			continue
+		}
+		seen[model] = struct{}{}
+		next = append(next, model)
+		if model != part {
+			changed = true
+		}
+	}
+
+	nextRaw := strings.Join(next, ",")
+	if nextRaw != raw {
+		changed = true
+	}
+	return nextRaw, changed
+}
+
+func CleanupModelsFromChannelsAndAbilities(models []string, mode ModelCleanupMode) (ModelCleanupResult, error) {
+	models = NormalizeModelCleanupNames(models)
+	result := ModelCleanupResult{
+		Models: stringSliceCopy(models),
+		Mode:   string(mode),
+	}
+	if len(models) == 0 {
+		return result, errors.New("模型名称不能为空")
+	}
+	if mode != ModelCleanupModeRemove && mode != ModelCleanupModeDisable {
+		return result, fmt.Errorf("不支持的模型清理模式: %s", mode)
+	}
+
+	modelSet := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		modelSet[model] = struct{}{}
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var abilities []Ability
+		if err := tx.Where("model IN ?", models).Find(&abilities).Error; err != nil {
+			return err
+		}
+		abilityChannelSet := make(map[int]struct{})
+		for _, ability := range abilities {
+			abilityChannelSet[ability.ChannelId] = struct{}{}
+		}
+		result.MatchedAbilityChannelIDs = intSetItems(abilityChannelSet)
+
+		var channels []Channel
+		if err := tx.Find(&channels).Error; err != nil {
+			return err
+		}
+		channelIDs := make([]int, 0)
+		for i := range channels {
+			nextModels, changed := removeModelsFromCSV(channels[i].Models, modelSet)
+			if !changed {
+				continue
+			}
+			if err := tx.Model(&Channel{}).Where("id = ?", channels[i].Id).Update("models", nextModels).Error; err != nil {
+				return err
+			}
+			channelIDs = append(channelIDs, channels[i].Id)
+		}
+		result.UpdatedChannels = int64(len(channelIDs))
+		sort.Ints(channelIDs)
+		result.MatchedChannelIDs = channelIDs
+
+		if mode == ModelCleanupModeRemove {
+			dbResult := tx.Where("model IN ?", models).Delete(&Ability{})
+			if dbResult.Error != nil {
+				return dbResult.Error
+			}
+			result.DeletedAbilities = dbResult.RowsAffected
+			return nil
+		}
+
+		dbResult := tx.Model(&Ability{}).Where("model IN ? AND enabled = ?", models, true).Update("enabled", false)
+		if dbResult.Error != nil {
+			return dbResult.Error
+		}
+		result.DisabledAbilities = dbResult.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+
+	InitChannelCache()
+	InvalidatePricingCache()
+	return result, nil
+}
+
+func stringSliceCopy(items []string) []string {
+	out := make([]string, len(items))
+	copy(out, items)
+	return out
+}
+
+func intSetItems(set map[int]struct{}) []int {
+	items := make([]int, 0, len(set))
+	for item := range set {
+		items = append(items, item)
+	}
+	sort.Ints(items)
+	return items
 }
 
 func GetGroupEnabledModels(group string) []string {

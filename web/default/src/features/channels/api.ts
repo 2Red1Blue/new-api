@@ -231,7 +231,7 @@ export async function fetchUpstreamGroupRatios(
 ): Promise<FetchUpstreamGroupRatiosResponse> {
   const res = await api.get(`/api/channel/${id}/upstream_group_ratios`, {
     disableDuplicate: true,
-  } as ExtendedApiConfig)
+  } as ApiRequestConfig)
   return res.data
 }
 

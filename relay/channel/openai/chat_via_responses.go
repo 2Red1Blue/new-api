@@ -109,6 +109,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		sentStop    bool
 		sawToolCall bool
 		streamErr   *types.NewAPIError
+		completed   bool
 	)
 
 	toolCallIndexByID := make(map[string]int)
@@ -443,6 +444,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		case "response.function_call_arguments.done":
 
 		case "response.completed":
+			completed = true
 			if streamResp.Response != nil {
 				if streamResp.Response.Model != "" {
 					model = streamResp.Response.Model
@@ -513,6 +515,13 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	})
 
 	if streamErr != nil {
+		return nil, streamErr
+	}
+	if !completed && info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF {
+		streamErr = responsesStreamClosedBeforeCompletedError()
+		if sentStart || responseWriterStarted(c) {
+			streamErr = types.WithOpenAIError(streamErr.ToOpenAIError(), streamErr.StatusCode, types.ErrOptionWithSkipRetry())
+		}
 		return nil, streamErr
 	}
 

@@ -31,7 +31,7 @@ import {
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import { formatPrice, formatRequestPrice } from '../lib/price'
-import type { PricingModel, TokenUnit } from '../types'
+import type { PricingCurrency, PricingModel, TokenUnit } from '../types'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 
 export interface ModelCardProps {
@@ -40,6 +40,7 @@ export interface ModelCardProps {
   priceRate?: number
   usdExchangeRate?: number
   tokenUnit?: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice?: boolean
   perf?: ModelPerfBadgeData
 }
@@ -71,6 +72,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         showRechargePrice,
         priceRate,
         usdExchangeRate,
+        currency: props.currency,
         groupRatioMultiplier: getDynamicDisplayGroupRatio(props.model),
       })
     : null
@@ -150,7 +152,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                         tokenUnit,
                         showRechargePrice,
                         priceRate,
-                        usdExchangeRate
+                        usdExchangeRate,
+                        props.currency
                       )}
                     </span>
                     /{tokenUnitLabel}
@@ -164,7 +167,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                         tokenUnit,
                         showRechargePrice,
                         priceRate,
-                        usdExchangeRate
+                        usdExchangeRate,
+                        props.currency
                       )}
                     </span>
                     /{tokenUnitLabel}
@@ -179,7 +183,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                           tokenUnit,
                           showRechargePrice,
                           priceRate,
-                          usdExchangeRate
+                          usdExchangeRate,
+                          props.currency
                         )}
                       </span>
                     </span>
@@ -192,7 +197,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                       props.model,
                       showRechargePrice,
                       priceRate,
-                      usdExchangeRate
+                      usdExchangeRate,
+                      props.currency
                     )}
                   </span>{' '}
                   / {t('request')}

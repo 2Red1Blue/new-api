@@ -111,6 +111,44 @@ func TestFetchUpstreamGroupRatiosAccountOnlyToken(t *testing.T) {
 	require.False(t, def.HasRPMLimit, "rpm_limit 字段缺失时 HasRPMLimit 应为 false")
 }
 
+func TestFetchUpstreamGroupRatiosFullCredentialPrioritizesLogin(t *testing.T) {
+	var anonymousRatioConfigHit int
+	var loginHit int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login":
+			loginHit++
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":42}}`))
+		case "/api/ratio_config":
+			if r.Header.Get("New-Api-User") != "42" {
+				anonymousRatioConfigHit++
+				w.Header().Set("Content-Type", "text/html")
+				_, _ = w.Write([]byte(`<!doctype html><html><body>login</body></html>`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group_ratio":{"vip":0.5}}}`))
+		case "/api/pricing":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<!doctype html><html><body>login</body></html>`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	result, err := FetchUpstreamGroupRatios(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		&UpstreamPricingCredential{Account: "user@example.com", Password: "secret"},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 0.5, result.Ratios["vip"])
+	require.Equal(t, 1, loginHit)
+	require.Equal(t, 0, anonymousRatioConfigHit)
+}
+
 // TestFetchUpstreamGroupRatiosNoCredentialReturnsError 验证无凭据且两端均失败时返回错误
 func TestFetchUpstreamGroupRatiosNoCredentialReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

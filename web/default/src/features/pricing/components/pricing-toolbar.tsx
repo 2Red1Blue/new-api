@@ -51,7 +51,12 @@ import {
   type SortOption,
   type ViewMode,
 } from '../constants'
-import type { PricingModel, PricingVendor, TokenUnit } from '../types'
+import type {
+  PricingCurrency,
+  PricingModel,
+  PricingVendor,
+  TokenUnit,
+} from '../types'
 import { PricingSidebar } from './pricing-sidebar'
 
 type SegmentOption = {
@@ -68,6 +73,8 @@ export interface PricingToolbarProps {
   onSortChange: (value: string) => void
   tokenUnit: TokenUnit
   onTokenUnitChange: (value: TokenUnit) => void
+  currency: PricingCurrency
+  onCurrencyChange: (value: PricingCurrency) => void
   showRechargePrice: boolean
   onRechargePriceChange: (value: boolean) => void
   viewMode: ViewMode
@@ -153,6 +160,11 @@ export function PricingToolbar(props: PricingToolbarProps) {
     [props]
   )
 
+  const handleCurrencyChange = useCallback(
+    (value: string) => props.onCurrencyChange(value as PricingCurrency),
+    [props]
+  )
+
   const handleViewModeChange = useCallback(
     (value: string) => props.onViewModeChange(value as ViewMode),
     [props]
@@ -215,6 +227,15 @@ export function PricingToolbar(props: PricingToolbarProps) {
               value={props.tokenUnit}
               onChange={handleTokenUnitChange}
               ariaLabel={t('Token unit')}
+            />
+            <SegmentedControl
+              options={[
+                { value: 'USD', label: '$ USD' },
+                { value: 'CNY', label: '¥ CNY' },
+              ]}
+              value={props.currency}
+              onChange={handleCurrencyChange}
+              ariaLabel={t('Currency')}
             />
           </div>
 

@@ -122,6 +122,10 @@ func RunChannelAutoPriorityScan(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
+func GetChannelAutoPriorityScanStatus(c *gin.Context) {
+	common.ApiSuccess(c, service.GetChannelAutoPriorityScanStatus())
+}
+
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`

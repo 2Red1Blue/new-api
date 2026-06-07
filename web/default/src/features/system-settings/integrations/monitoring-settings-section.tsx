@@ -18,13 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useRef } from 'react'
 import * as z from 'zod'
-import { useMutation } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Loader2, RefreshCw } from 'lucide-react'
 import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -37,6 +39,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { getAutoPriorityScanStatus, runAutoPriorityScanOnce } from '../api'
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -44,10 +47,8 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
-import { runAutoPriorityScanOnce } from '../api'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
-import { Button } from '@/components/ui/button'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 
 const numericString = z.string().refine((value) => {
@@ -223,6 +224,7 @@ export function MonitoringSettingsSection({
 }: MonitoringSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const queryClient = useQueryClient()
   const baselineRef = useRef<NormalizedMonitoringValues>(
     normalizeDefaults(defaultValues)
   )
@@ -237,6 +239,13 @@ export function MonitoringSettingsSection({
     defaultValues: formDefaults,
   })
 
+  const { data: autoPriorityScanStatus } = useQuery({
+    queryKey: ['auto-priority-scan-status'],
+    queryFn: getAutoPriorityScanStatus,
+    refetchInterval: 60_000,
+  })
+  const autoPriorityScanStatusData = autoPriorityScanStatus?.data
+
   const runAutoPriorityScan = useMutation({
     mutationFn: runAutoPriorityScanOnce,
     onSuccess: (response) => {
@@ -249,11 +258,17 @@ export function MonitoringSettingsSection({
         return
       }
       toast.success(
-        t('Auto priority scan finished: scanned {{scanned}}, applied {{applied}}', {
-          scanned: response.data?.scanned ?? 0,
-          applied: response.data?.applied ?? 0,
-        })
+        t(
+          'Auto priority scan finished: scanned {{scanned}}, applied {{applied}}',
+          {
+            scanned: response.data?.scanned ?? 0,
+            applied: response.data?.applied ?? 0,
+          }
+        )
       )
+      queryClient.invalidateQueries({
+        queryKey: ['auto-priority-scan-status'],
+      })
     },
     onError: (error: Error) => {
       toast.error(error.message || t('Failed to run auto priority scan'))
@@ -330,38 +345,78 @@ export function MonitoringSettingsSection({
               control={form.control}
               name='monitor_setting.auto_priority_scan_enabled'
               render={({ field }) => (
-                <FormItem className='flex flex-row items-center justify-between gap-4 rounded-lg border p-4'>
-                  <div className='space-y-0.5'>
-                    <FormLabel className='text-base'>
-                      {t('Background auto priority scan')}
-                    </FormLabel>
-                    <FormDescription>
-                      {t(
-                        'Periodically scan channels that have cost-first auto priority enabled'
-                      )}
-                    </FormDescription>
-                  </div>
-                  <div className='flex shrink-0 items-center gap-2'>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      disabled={runAutoPriorityScan.isPending}
-                      onClick={() => runAutoPriorityScan.mutate()}
-                    >
-                      {runAutoPriorityScan.isPending ? (
-                        <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                      ) : (
-                        <RefreshCw className='h-3.5 w-3.5' />
-                      )}
-                      {t('Run once')}
-                    </Button>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
+                <FormItem className='rounded-lg border p-4'>
+                  <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+                    <div className='space-y-1'>
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <FormLabel className='text-base'>
+                          {t('Background auto priority scan')}
+                        </FormLabel>
+                        {autoPriorityScanStatusData ? (
+                          <Badge
+                            variant={
+                              autoPriorityScanStatusData.scheduled
+                                ? 'secondary'
+                                : 'destructive'
+                            }
+                          >
+                            {autoPriorityScanStatusData.scheduled
+                              ? t('Scheduled on this node')
+                              : t('Not scheduled on this node')}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <FormDescription>
+                        {t(
+                          'Periodically scan channels that have cost-first auto priority enabled'
+                        )}
+                      </FormDescription>
+                      {autoPriorityScanStatusData ? (
+                        <p className='text-muted-foreground text-xs'>
+                          {autoPriorityScanStatusData.scheduled
+                            ? t(
+                                'This node is master and will run scans every {{hours}} hours.',
+                                {
+                                  hours:
+                                    autoPriorityScanStatusData.interval_hours,
+                                }
+                              )
+                            : t(autoPriorityScanStatusData.reason)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className='flex shrink-0 items-center gap-2'>
+                      {autoPriorityScanStatusData?.running ? (
+                        <Badge variant='outline'>{t('Running')}</Badge>
+                      ) : null}
+                      {autoPriorityScanStatusData ? (
+                        <Badge variant='outline'>
+                          {t('Node: {{nodeType}}', {
+                            nodeType: autoPriorityScanStatusData.node_type,
+                          })}
+                        </Badge>
+                      ) : null}
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        disabled={runAutoPriorityScan.isPending}
+                        onClick={() => runAutoPriorityScan.mutate()}
+                      >
+                        {runAutoPriorityScan.isPending ? (
+                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                        ) : (
+                          <RefreshCw className='h-3.5 w-3.5' />
+                        )}
+                        {t('Run once')}
+                      </Button>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </div>
                   </div>
                 </FormItem>
               )}

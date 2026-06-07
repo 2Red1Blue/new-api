@@ -69,17 +69,12 @@ func UpstreamCredentialFromProfileRecord(profile *model.ChannelUpstreamProfile) 
 }
 
 // FetchUpstreamGroupRatios 按以下顺序尝试获取上游分组倍率：
-//  1. 无认证试标准 new-api 端点（/api/ratio_config, /api/pricing）
-//  2. 无认证试 sub2api 端点（/api/v1/groups/available）
-//  3. credential 为空或 account 为空 → 返回前两次合并错误
-//  4. password 为空，account 当 sub2api access token 直连
-//  5. account + password → 先 new-api 登录获取 userID，再 sub2api 邮箱+密码登录获取 token
+//  1. account + password → 优先登录 new-api 后获取标准端点，避免未登录接口返回 HTML 登录页
+//  2. account + password → 再尝试 sub2api 邮箱+密码登录获取 token
+//  3. password 为空，account 当 sub2api access token 直连
+//  4. 无认证试标准 new-api 端点（/api/ratio_config, /api/pricing）
+//  5. 无认证试 sub2api 端点（/api/v1/groups/available）
 func FetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL string, credential *UpstreamPricingCredential) (*UpstreamGroupRatiosResult, error) {
-	legacyResult, legacyErr := fetchUpstreamGroupRatiosLegacy(ctx, client, baseURL, "")
-	if legacyErr == nil {
-		return legacyResult, nil
-	}
-
 	account := ""
 	password := ""
 	if credential != nil {
@@ -88,9 +83,49 @@ func FetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL 
 	}
 	hasFullCredential := account != "" && password != ""
 
-	// 无完整凭据时才尝试无认证 sub2api，避免在有账密时浪费一次必失败的请求
 	var sub2apiResult *UpstreamGroupRatiosResult
 	var sub2apiErr error
+	var legacyResult *UpstreamGroupRatiosResult
+	var legacyErr error
+	var loginErr error
+	var sub2apiLoginErr error
+
+	// account + password：先尝试 new-api 登录
+	if hasFullCredential {
+		authClient, userID, err := loginUpstreamLegacy(ctx, baseURL, &UpstreamPricingCredential{Account: account, Password: password})
+		loginErr = err
+		if loginErr == nil {
+			legacyResult, legacyErr = fetchUpstreamGroupRatiosLegacy(ctx, authClient, baseURL, userID)
+			if legacyErr == nil {
+				return legacyResult, nil
+			}
+		}
+
+		// 再尝试 sub2api 邮箱+密码登录
+		sub2apiClient, accessToken, err := loginSub2API(ctx, baseURL, &UpstreamPricingCredential{Account: account, Password: password})
+		sub2apiLoginErr = err
+		if sub2apiLoginErr == nil {
+			sub2apiResult, sub2apiErr = fetchSub2APIGroupRatios(ctx, sub2apiClient, baseURL, accessToken)
+			if sub2apiErr == nil {
+				return sub2apiResult, nil
+			}
+		}
+	}
+
+	// account 非空、password 为空：sub2api token 直连模式
+	if account != "" && password == "" {
+		sub2apiResult, sub2apiErr = fetchSub2APIGroupRatios(ctx, client, baseURL, account)
+		if sub2apiErr == nil {
+			return sub2apiResult, nil
+		}
+	}
+
+	// 无凭据或认证路径失败后，再尝试匿名接口作为 fallback。
+	legacyResult, legacyErr = fetchUpstreamGroupRatiosLegacy(ctx, client, baseURL, "")
+	if legacyErr == nil {
+		return legacyResult, nil
+	}
+
 	if !hasFullCredential {
 		sub2apiResult, sub2apiErr = fetchSub2APIGroupRatios(ctx, client, baseURL, "")
 		if sub2apiErr == nil {
@@ -98,43 +133,14 @@ func FetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL 
 		}
 	}
 
-	if account == "" {
-		return nil, JoinGroupFetchErrors(legacyErr, sub2apiErr)
-	}
-
-	// account 非空、password 为空：sub2api token 直连模式
-	if password == "" {
-		sub2apiResult, sub2apiErr = fetchSub2APIGroupRatios(ctx, client, baseURL, account)
-		if sub2apiErr == nil {
-			return sub2apiResult, nil
-		}
-		return nil, JoinGroupFetchErrors(legacyErr, sub2apiErr)
-	}
-
-	// account + password：先尝试 new-api 登录
-	authClient, userID, loginErr := loginUpstreamLegacy(ctx, baseURL, &UpstreamPricingCredential{Account: account, Password: password})
-	if loginErr == nil {
-		legacyResult, legacyErr = fetchUpstreamGroupRatiosLegacy(ctx, authClient, baseURL, userID)
-		if legacyErr == nil {
-			return legacyResult, nil
-		}
-	}
-
-	// 再尝试 sub2api 邮箱+密码登录
-	sub2apiClient, accessToken, sub2apiLoginErr := loginSub2API(ctx, baseURL, &UpstreamPricingCredential{Account: account, Password: password})
-	if sub2apiLoginErr == nil {
-		sub2apiResult, sub2apiErr = fetchSub2APIGroupRatios(ctx, sub2apiClient, baseURL, accessToken)
-		if sub2apiErr == nil {
-			return sub2apiResult, nil
-		}
-	}
-
 	err := JoinGroupFetchErrors(legacyErr, sub2apiErr)
-	if loginErr != nil {
-		err = fmt.Errorf("%w；newapi 登录失败: %v", err, loginErr)
-	}
-	if sub2apiLoginErr != nil {
-		err = fmt.Errorf("%w；sub2api 登录失败: %v", err, sub2apiLoginErr)
+	if hasFullCredential {
+		if loginErr != nil {
+			err = fmt.Errorf("%w；newapi 登录失败: %v", err, loginErr)
+		}
+		if sub2apiLoginErr != nil {
+			err = fmt.Errorf("%w；sub2api 登录失败: %v", err, sub2apiLoginErr)
+		}
 	}
 	return nil, err
 }

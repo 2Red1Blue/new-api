@@ -36,7 +36,7 @@ import {
 import { TableSkeleton, TableEmpty } from '@/components/data-table'
 import { DataTablePagination } from '@/components/data-table/pagination'
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
-import type { PricingModel, TokenUnit } from '../types'
+import type { PricingCurrency, PricingModel, TokenUnit } from '../types'
 import { usePricingColumns } from './pricing-columns'
 
 export interface PricingTableProps {
@@ -45,6 +45,7 @@ export interface PricingTableProps {
   priceRate?: number
   usdExchangeRate?: number
   tokenUnit?: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice?: boolean
   onModelClick?: (modelName: string) => void
 }
@@ -57,6 +58,7 @@ export function PricingTable(props: PricingTableProps) {
     priceRate = 1,
     usdExchangeRate = 1,
     tokenUnit = DEFAULT_TOKEN_UNIT,
+    currency,
     showRechargePrice = false,
     onModelClick,
   } = props
@@ -68,6 +70,7 @@ export function PricingTable(props: PricingTableProps) {
 
   const columns = usePricingColumns({
     tokenUnit,
+    currency,
     priceRate,
     usdExchangeRate,
     showRechargePrice,

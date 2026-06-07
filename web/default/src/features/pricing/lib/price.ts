@@ -16,9 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { formatCurrencyFromUSD } from '@/lib/currency'
+import {
+  formatBillingCurrencyFromUSD,
+  formatCurrencyFromUSD,
+  type CurrencyFormatOptions,
+} from '@/lib/currency'
 import { QUOTA_TYPE_VALUES, TOKEN_UNIT_DIVISORS } from '../constants'
-import type { PricingModel, TokenUnit, PriceType } from '../types'
+import type {
+  PricingModel,
+  TokenUnit,
+  PriceType,
+  PricingCurrency,
+} from '../types'
 
 // ----------------------------------------------------------------------------
 // Price Calculation Utilities
@@ -157,6 +166,24 @@ function applyRechargeRate(
   return (price * priceRate) / usdExchangeRate
 }
 
+function formatPricingCurrencyFromUSD(
+  amountUSD: number | null | undefined,
+  usdExchangeRate: number,
+  options: CurrencyFormatOptions,
+  currency?: PricingCurrency
+): string {
+  if (!currency) {
+    return formatCurrencyFromUSD(amountUSD, options)
+  }
+
+  return formatBillingCurrencyFromUSD(
+    amountUSD,
+    options,
+    currency,
+    Math.max(usdExchangeRate || 1, 0.001)
+  )
+}
+
 /**
  * Format token-based price for display
  */
@@ -166,7 +193,8 @@ export function formatPrice(
   tokenUnit: TokenUnit,
   showWithRecharge = false,
   priceRate = 1,
-  usdExchangeRate = 1
+  usdExchangeRate = 1,
+  currency?: PricingCurrency
 ): string {
   if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
     return '-'
@@ -187,11 +215,16 @@ export function formatPrice(
   )
 
   const price = priceInUSD / TOKEN_UNIT_DIVISORS[tokenUnit]
-  return formatCurrencyFromUSD(price, {
-    digitsLarge: 4,
-    digitsSmall: 6,
-    abbreviate: false,
-  })
+  return formatPricingCurrencyFromUSD(
+    price,
+    usdExchangeRate,
+    {
+      digitsLarge: 4,
+      digitsSmall: 6,
+      abbreviate: false,
+    },
+    currency
+  )
 }
 
 /**
@@ -205,7 +238,8 @@ export function formatGroupPrice(
   showWithRecharge = false,
   priceRate = 1,
   usdExchangeRate = 1,
-  groupRatio: Record<string, number>
+  groupRatio: Record<string, number>,
+  currency?: PricingCurrency
 ): string {
   if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
     return '-'
@@ -222,11 +256,16 @@ export function formatGroupPrice(
   )
 
   const price = priceInUSD / TOKEN_UNIT_DIVISORS[tokenUnit]
-  return formatCurrencyFromUSD(price, {
-    digitsLarge: 4,
-    digitsSmall: 6,
-    abbreviate: false,
-  })
+  return formatPricingCurrencyFromUSD(
+    price,
+    usdExchangeRate,
+    {
+      digitsLarge: 4,
+      digitsSmall: 6,
+      abbreviate: false,
+    },
+    currency
+  )
 }
 
 /**
@@ -238,7 +277,8 @@ export function formatFixedPrice(
   showWithRecharge = false,
   priceRate = 1,
   usdExchangeRate = 1,
-  groupRatio: Record<string, number>
+  groupRatio: Record<string, number>,
+  currency?: PricingCurrency
 ): string {
   if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
     return '-'
@@ -254,11 +294,16 @@ export function formatFixedPrice(
     usdExchangeRate
   )
 
-  return formatCurrencyFromUSD(priceInUSD, {
-    digitsLarge: 4,
-    digitsSmall: 4,
-    abbreviate: false,
-  })
+  return formatPricingCurrencyFromUSD(
+    priceInUSD,
+    usdExchangeRate,
+    {
+      digitsLarge: 4,
+      digitsSmall: 4,
+      abbreviate: false,
+    },
+    currency
+  )
 }
 
 /**
@@ -268,7 +313,8 @@ export function formatRequestPrice(
   model: PricingModel,
   showWithRecharge = false,
   priceRate = 1,
-  usdExchangeRate = 1
+  usdExchangeRate = 1,
+  currency?: PricingCurrency
 ): string {
   if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
     return '-'
@@ -289,9 +335,14 @@ export function formatRequestPrice(
     usdExchangeRate
   )
 
-  return formatCurrencyFromUSD(priceInUSD, {
-    digitsLarge: 4,
-    digitsSmall: 4,
-    abbreviate: false,
-  })
+  return formatPricingCurrencyFromUSD(
+    priceInUSD,
+    usdExchangeRate,
+    {
+      digitsLarge: 4,
+      digitsSmall: 4,
+      abbreviate: false,
+    },
+    currency
+  )
 }

@@ -406,12 +406,23 @@ export function formatCurrencyFromUSD(
  */
 export function formatBillingCurrencyFromUSD(
   amountUSD: number | null | undefined,
-  options?: CurrencyFormatOptions
+  options?: CurrencyFormatOptions,
+  displayTypeOverride?: Extract<CurrencyDisplayType, 'USD' | 'CNY'>,
+  exchangeRateOverride?: number
 ): string {
   if (amountUSD == null || Number.isNaN(amountUSD)) return '-'
 
   const { config } = getCurrencyDisplay()
-  const meta = getBillingDisplayMeta(config)
+  const meta = displayTypeOverride
+    ? getBillingDisplayMeta({
+        ...config,
+        quotaDisplayType: displayTypeOverride,
+        usdExchangeRate:
+          displayTypeOverride === 'CNY' && exchangeRateOverride
+            ? exchangeRateOverride
+            : config.usdExchangeRate,
+      })
+    : getBillingDisplayMeta(config)
   const merged = mergeOptions(options)
   const value =
     meta.kind === 'currency' || meta.kind === 'custom'

@@ -102,6 +102,7 @@ export type PricingData = {
 }
 
 export type TokenUnit = 'M' | 'K'
+export type PricingCurrency = 'USD' | 'CNY'
 export type PriceType =
   | 'input'
   | 'output'

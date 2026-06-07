@@ -36,6 +36,8 @@ const STATUS_RELATED_KEYS = [
   'general_setting.quota_display_type',
   'general_setting.custom_currency_symbol',
   'general_setting.custom_currency_exchange_rate',
+  'monitor_setting.auto_priority_scan_enabled',
+  'monitor_setting.auto_priority_scan_interval_hours',
 ]
 
 export function useUpdateOption() {
@@ -51,6 +53,9 @@ export function useUpdateOption() {
         // If updating frontend-display-related config, also refresh status
         if (STATUS_RELATED_KEYS.includes(variables.key)) {
           queryClient.invalidateQueries({ queryKey: ['status'] })
+          queryClient.invalidateQueries({
+            queryKey: ['auto-priority-scan-status'],
+          })
           try {
             window.localStorage.removeItem('status')
           } catch {

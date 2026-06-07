@@ -41,6 +41,7 @@ import {
   ModelRatioVisualEditor,
   type ModelRatioVisualEditorHandle,
 } from './model-ratio-visual-editor'
+import { ModelAccessCleanup } from './model-access-cleanup'
 
 type ModelFormValues = {
   ModelPrice: string
@@ -228,6 +229,8 @@ export const ModelRatioForm = memo(function ModelRatioForm({
           )}
         </Button>
       </div>
+
+      <ModelAccessCleanup />
 
       <Form {...form}>
         {editMode === 'visual' ? (

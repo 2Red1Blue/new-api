@@ -19,6 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import type { AxiosRequestConfig } from 'axios'
 import { api } from '@/lib/api'
 import type {
+  AutoPriorityScanStatusResponse,
+  CleanupModelAccessRequest,
+  CleanupModelAccessResponse,
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
@@ -66,12 +69,27 @@ export async function resetModelRatios() {
   return res.data
 }
 
+export async function cleanupModelAccess(request: CleanupModelAccessRequest) {
+  const res = await api.post<CleanupModelAccessResponse>(
+    '/api/option/cleanup_model_access',
+    request
+  )
+  return res.data
+}
+
 export async function runAutoPriorityScanOnce() {
   const config: ExtendedApiConfig = { skipBusinessError: true }
   const res = await api.post<RunAutoPriorityScanResponse>(
     '/api/option/channel_auto_priority_scan/run',
     {},
     config
+  )
+  return res.data
+}
+
+export async function getAutoPriorityScanStatus() {
+  const res = await api.get<AutoPriorityScanStatusResponse>(
+    '/api/option/channel_auto_priority_scan/status'
   )
   return res.data
 }

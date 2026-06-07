@@ -81,6 +81,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var streamErr *types.NewAPIError
 	var pendingEvents []responsesStreamEvent
 	forwarded := false
+	completed := false
 
 	flushPendingEvents := func() {
 		for _, event := range pendingEvents {
@@ -121,6 +122,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		forwarded = true
 		switch streamResponse.Type {
 		case "response.completed":
+			completed = true
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
 					if streamResponse.Response.Usage.InputTokens != 0 {
@@ -164,6 +166,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if streamErr != nil {
 		return nil, streamErr
 	}
+	if !completed && info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF {
+		streamErr = responsesStreamClosedBeforeCompletedError()
+		if forwarded || responseWriterStarted(c) {
+			flushPendingEvents()
+			streamResponse, data := responsesStreamClosedBeforeCompletedEvent(streamErr)
+			sendResponsesStreamData(c, streamResponse, data)
+			streamErr = types.WithOpenAIError(streamErr.ToOpenAIError(), streamErr.StatusCode, types.ErrOptionWithSkipRetry())
+		}
+		return nil, streamErr
+	}
 	flushPendingEvents()
 
 	if usage.CompletionTokens == 0 {
@@ -205,6 +217,24 @@ func responsesStreamFailureError(streamResponse dto.ResponsesStreamResponse) *ty
 		}
 	}
 	return types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResponse.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+}
+
+func responsesStreamClosedBeforeCompletedError() *types.NewAPIError {
+	return types.NewOpenAIError(fmt.Errorf("responses stream closed before response.completed"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+}
+
+func responsesStreamClosedBeforeCompletedEvent(streamErr *types.NewAPIError) (dto.ResponsesStreamResponse, string) {
+	streamResponse := dto.ResponsesStreamResponse{
+		Type: "response.failed",
+		Response: &dto.OpenAIResponsesResponse{
+			Error: streamErr.ToOpenAIError(),
+		},
+	}
+	data, err := common.Marshal(streamResponse)
+	if err != nil {
+		return streamResponse, `{"type":"response.failed"}`
+	}
+	return streamResponse, string(data)
 }
 
 func responseWriterStarted(c *gin.Context) bool {

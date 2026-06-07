@@ -39,13 +39,50 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type ModelAccessCleanupMode = 'remove' | 'disable'
+
+export type CleanupModelAccessRequest = {
+  models: string[]
+  mode: ModelAccessCleanupMode
+}
+
+export type CleanupModelAccessResponse = {
+  success: boolean
+  message: string
+  data?: {
+    models: string[]
+    mode: ModelAccessCleanupMode
+    updated_channels: number
+    deleted_abilities?: number
+    disabled_abilities?: number
+    matched_channel_ids: number[]
+    matched_ability_channel_ids: number[]
+  }
+}
+
 export type RunAutoPriorityScanResponse = {
   success: boolean
   message: string
   data?: {
     scanned: number
     applied: number
+    ratio_synced?: number
+    ratio_failed?: number
     skipped?: boolean
+  }
+}
+
+export type AutoPriorityScanStatusResponse = {
+  success: boolean
+  message: string
+  data?: {
+    enabled: boolean
+    scheduled: boolean
+    running: boolean
+    is_master_node: boolean
+    node_type: string
+    interval_hours: number
+    reason: string
   }
 }
 

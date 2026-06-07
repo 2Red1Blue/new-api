@@ -51,7 +51,11 @@ import {
   formatThroughput,
   formatUptimePct,
 } from '@/features/performance-metrics/lib/format'
-import { DEFAULT_TOKEN_UNIT, QUOTA_TYPE_VALUES } from '../constants'
+import {
+  DEFAULT_PRICING_CURRENCY,
+  DEFAULT_TOKEN_UNIT,
+  QUOTA_TYPE_VALUES,
+} from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
 import {
   getDynamicPriceEntries,
@@ -67,6 +71,7 @@ import type {
   Modality,
   ModelCapability,
   PriceType,
+  PricingCurrency,
   PricingModel,
   TokenUnit,
 } from '../types'
@@ -346,6 +351,7 @@ function PriceSection(props: {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
@@ -358,6 +364,7 @@ function PriceSection(props: {
     showRechargePrice: props.showRechargePrice,
     priceRate: props.priceRate,
     usdExchangeRate: props.usdExchangeRate,
+    currency: props.currency,
     groupRatioMultiplier: 1,
   })
 
@@ -492,7 +499,8 @@ function PriceSection(props: {
               props.showRechargePrice,
               props.priceRate,
               props.usdExchangeRate,
-              baseGroupRatioMap
+              baseGroupRatioMap,
+              props.currency
             )}
           </span>
         </div>
@@ -511,7 +519,8 @@ function PriceSection(props: {
         props.showRechargePrice,
         props.priceRate,
         props.usdExchangeRate,
-        baseGroupRatioMap
+        baseGroupRatioMap,
+        props.currency
       )}
       <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
         / {tokenUnitLabel}
@@ -598,6 +607,7 @@ function GroupPricingSection(props: {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice?: boolean
 }) {
   const { t } = useTranslation()
@@ -685,6 +695,7 @@ function GroupPricingSection(props: {
               showRechargePrice,
               priceRate: props.priceRate,
               usdExchangeRate: props.usdExchangeRate,
+              currency: props.currency,
               groupRatioMultiplier: 1,
             })
           )
@@ -729,6 +740,7 @@ function GroupPricingSection(props: {
                           showRechargePrice,
                           priceRate: props.priceRate,
                           usdExchangeRate: props.usdExchangeRate,
+                          currency: props.currency,
                           groupRatioMultiplier: ratio,
                         })
                         const entryMap = new Map(
@@ -824,7 +836,8 @@ function GroupPricingSection(props: {
                           showRechargePrice,
                           props.priceRate,
                           props.usdExchangeRate,
-                          props.groupRatio
+                          props.groupRatio,
+                          props.currency
                         )}
                       </TableCell>
                       <TableCell className='py-2.5 text-right font-mono'>
@@ -836,7 +849,8 @@ function GroupPricingSection(props: {
                           showRechargePrice,
                           props.priceRate,
                           props.usdExchangeRate,
-                          props.groupRatio
+                          props.groupRatio,
+                          props.currency
                         )}
                       </TableCell>
                       {extraPriceTypes.map((ep) => (
@@ -852,7 +866,8 @@ function GroupPricingSection(props: {
                             showRechargePrice,
                             props.priceRate,
                             props.usdExchangeRate,
-                            props.groupRatio
+                            props.groupRatio,
+                            props.currency
                           )}
                         </TableCell>
                       ))}
@@ -865,7 +880,8 @@ function GroupPricingSection(props: {
                         showRechargePrice,
                         props.priceRate,
                         props.usdExchangeRate,
-                        props.groupRatio
+                        props.groupRatio,
+                        props.currency
                       )}
                     </TableCell>
                   )}
@@ -905,6 +921,7 @@ export interface ModelDetailsContentProps {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice?: boolean
 }
 
@@ -948,10 +965,15 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
+              currency={props.currency}
               showRechargePrice={showRechargePrice}
             />
             {isDynamic && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
+              <DynamicPricingBreakdown
+                billingExpr={props.model.billing_expr}
+                currency={props.currency}
+                usdExchangeRate={props.usdExchangeRate}
+              />
             )}
             <GroupPricingSection
               model={props.model}
@@ -961,6 +983,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
+              currency={props.currency}
               showRechargePrice={showRechargePrice}
             />
           </section>
@@ -1043,6 +1066,8 @@ export function ModelDetails() {
 
   const tokenUnit: TokenUnit =
     search.tokenUnit === 'K' ? 'K' : DEFAULT_TOKEN_UNIT
+  const currency: PricingCurrency =
+    search.currency === 'CNY' ? 'CNY' : DEFAULT_PRICING_CURRENCY
 
   const model = useMemo(() => {
     if (!models || !modelId) return null
@@ -1117,6 +1142,7 @@ export function ModelDetails() {
           priceRate={priceRate ?? 1}
           usdExchangeRate={usdExchangeRate ?? 1}
           tokenUnit={tokenUnit}
+          currency={currency}
           showRechargePrice={search.rechargePrice ?? false}
           endpointMap={
             (endpointMap as Record<

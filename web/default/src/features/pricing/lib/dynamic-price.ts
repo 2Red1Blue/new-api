@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { TOKEN_UNIT_DIVISORS } from '../constants'
-import type { PricingModel, TokenUnit } from '../types'
+import type { PricingCurrency, PricingModel, TokenUnit } from '../types'
 import {
   BILLING_PRICING_VARS,
   parseTiersFromExpr,
@@ -33,6 +33,7 @@ type DynamicPriceOptions = {
   showRechargePrice?: boolean
   priceRate?: number
   usdExchangeRate?: number
+  currency?: PricingCurrency
   groupRatioMultiplier?: number
 }
 
@@ -111,7 +112,7 @@ export function formatDynamicUnitPrice(
     digitsLarge: 4,
     digitsSmall: 6,
     abbreviate: false,
-  })
+  }, options.currency, usdExchangeRate)
 }
 
 export function getDynamicPricingTiers(model: PricingModel): ParsedTier[] {

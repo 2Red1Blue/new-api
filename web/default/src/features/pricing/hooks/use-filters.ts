@@ -24,11 +24,12 @@ import {
   QUOTA_TYPES,
   ENDPOINT_TYPES,
   DEFAULT_TOKEN_UNIT,
+  DEFAULT_PRICING_CURRENCY,
   VIEW_MODES,
   type ViewMode,
 } from '../constants'
 import { filterAndSortModels, extractAllTags } from '../lib/filters'
-import type { PricingModel, TokenUnit } from '../types'
+import type { PricingCurrency, PricingModel, TokenUnit } from '../types'
 
 type FilterState = {
   search?: string
@@ -39,6 +40,7 @@ type FilterState = {
   endpointType?: string
   tag?: string
   tokenUnit?: TokenUnit
+  currency?: PricingCurrency
   view?: ViewMode
   rechargePrice?: boolean
 }
@@ -61,6 +63,7 @@ export function useFilters(models: PricingModel[]) {
     endpointType: search.endpointType,
     tag: search.tag,
     tokenUnit: search.tokenUnit,
+    currency: search.currency,
     view: search.view,
     rechargePrice: search.rechargePrice,
   }))
@@ -74,6 +77,8 @@ export function useFilters(models: PricingModel[]) {
   const tagFilter = filterState.tag || FILTER_ALL
   const tokenUnit: TokenUnit =
     filterState.tokenUnit === 'K' ? 'K' : DEFAULT_TOKEN_UNIT
+  const currency: PricingCurrency =
+    filterState.currency === 'CNY' ? 'CNY' : DEFAULT_PRICING_CURRENCY
   const viewMode = normalizeViewMode(filterState.view)
   const showRechargePrice = filterState.rechargePrice === true
 
@@ -125,6 +130,13 @@ export function useFilters(models: PricingModel[]) {
   const setTokenUnit = useCallback(
     (v: TokenUnit) =>
       updateFilters({ tokenUnit: v === DEFAULT_TOKEN_UNIT ? undefined : v }),
+    [updateFilters]
+  )
+  const setCurrency = useCallback(
+    (v: PricingCurrency) =>
+      updateFilters({
+        currency: v === DEFAULT_PRICING_CURRENCY ? undefined : v,
+      }),
     [updateFilters]
   )
   const setViewMode = useCallback(
@@ -208,6 +220,7 @@ export function useFilters(models: PricingModel[]) {
     endpointTypeFilter,
     tagFilter,
     tokenUnit,
+    currency,
     viewMode,
     showRechargePrice,
     setSearchInput,
@@ -218,6 +231,7 @@ export function useFilters(models: PricingModel[]) {
     setEndpointTypeFilter,
     setTagFilter,
     setTokenUnit,
+    setCurrency,
     setViewMode,
     setShowRechargePrice,
     filteredModels,

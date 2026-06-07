@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -112,4 +114,41 @@ func RefreshPricingCache(c *gin.Context) {
 		"message": "价格缓存已刷新",
 		"count":   len(pricing),
 	})
+}
+
+type CleanupModelAccessRequest struct {
+	Models []string `json:"models"`
+	Mode   string   `json:"mode"`
+}
+
+func splitCleanupModelNames(raw []string) []string {
+	models := make([]string, 0, len(raw))
+	for _, item := range raw {
+		parts := strings.FieldsFunc(item, func(r rune) bool {
+			return r == ',' || r == '\n' || r == '\r' || r == '\t'
+		})
+		models = append(models, parts...)
+	}
+	return model.NormalizeModelCleanupNames(models)
+}
+
+func CleanupModelAccess(c *gin.Context) {
+	var req CleanupModelAccessRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+
+	models := splitCleanupModelNames(req.Models)
+	mode := model.ModelCleanupMode(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = model.ModelCleanupModeRemove
+	}
+
+	result, err := model.CleanupModelsFromChannelsAndAbilities(models, mode)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }

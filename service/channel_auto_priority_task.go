@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,11 +28,21 @@ var (
 )
 
 type ChannelAutoPriorityScanResult struct {
-	Scanned      int  `json:"scanned"`
-	Applied      int  `json:"applied"`
-	RatioSynced  int  `json:"ratio_synced"`
-	RatioFailed  int  `json:"ratio_failed"`
-	Skipped      bool `json:"skipped"`
+	Scanned     int  `json:"scanned"`
+	Applied     int  `json:"applied"`
+	RatioSynced int  `json:"ratio_synced"`
+	RatioFailed int  `json:"ratio_failed"`
+	Skipped     bool `json:"skipped"`
+}
+
+type ChannelAutoPriorityScanStatus struct {
+	Enabled       bool    `json:"enabled"`
+	Scheduled     bool    `json:"scheduled"`
+	Running       bool    `json:"running"`
+	IsMasterNode  bool    `json:"is_master_node"`
+	NodeType      string  `json:"node_type"`
+	IntervalHours float64 `json:"interval_hours"`
+	Reason        string  `json:"reason"`
 }
 
 func normalizeAutoPriorityScanInterval(hours float64) time.Duration {
@@ -44,6 +55,7 @@ func normalizeAutoPriorityScanInterval(hours float64) time.Duration {
 func StartChannelAutoPriorityScanTask() {
 	channelAutoPriorityScanOnce.Do(func() {
 		if !common.IsMasterNode {
+			logger.LogInfo(context.Background(), "channel auto-priority scan task skipped: current node is not master")
 			return
 		}
 		gopool.Go(func() {
@@ -63,6 +75,32 @@ func StartChannelAutoPriorityScanTask() {
 			}
 		})
 	})
+}
+
+func GetChannelAutoPriorityScanStatus() ChannelAutoPriorityScanStatus {
+	setting := operation_setting.GetMonitorSetting()
+	nodeType := os.Getenv("NODE_TYPE")
+	if nodeType == "" {
+		nodeType = "master"
+	}
+
+	status := ChannelAutoPriorityScanStatus{
+		Enabled:       setting.AutoPriorityScanEnabled,
+		Scheduled:     common.IsMasterNode && setting.AutoPriorityScanEnabled,
+		Running:       channelAutoPriorityScanRunning.Load(),
+		IsMasterNode:  common.IsMasterNode,
+		NodeType:      nodeType,
+		IntervalHours: setting.AutoPriorityScanIntervalHours,
+	}
+	switch {
+	case !common.IsMasterNode:
+		status.Reason = "Current node is not master, so scheduled scans do not run here."
+	case !setting.AutoPriorityScanEnabled:
+		status.Reason = "Background auto priority scan is disabled."
+	default:
+		status.Reason = "Scheduled scans are active on this node."
+	}
+	return status
 }
 
 func RunChannelAutoPriorityScanOnce() (ChannelAutoPriorityScanResult, error) {

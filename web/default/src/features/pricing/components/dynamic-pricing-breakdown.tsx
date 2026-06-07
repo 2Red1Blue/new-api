@@ -48,9 +48,12 @@ import {
   type RequestRuleGroup,
   type TierCondition,
 } from '../lib/billing-expr'
+import type { PricingCurrency } from '../types'
 
 type DynamicPricingBreakdownProps = {
   billingExpr: string | null | undefined
+  currency?: PricingCurrency
+  usdExchangeRate?: number
   /**
    * Label of the tier that fired for the current request. When provided,
    * the corresponding row is highlighted and tagged as "Matched". Used by
@@ -155,6 +158,8 @@ function describeGroup(
 
 export function DynamicPricingBreakdown({
   billingExpr,
+  currency: displayCurrency,
+  usdExchangeRate,
   matchedTierLabel,
   hideCacheColumns = false,
 }: DynamicPricingBreakdownProps) {
@@ -163,6 +168,12 @@ export function DynamicPricingBreakdown({
   const currency = useSystemConfigStore((s) => s.config.currency)
 
   const { symbol, rate } = useMemo(() => {
+    if (displayCurrency === 'CNY') {
+      return { symbol: '¥', rate: Math.max(usdExchangeRate || 1, 0.001) }
+    }
+    if (displayCurrency === 'USD') {
+      return { symbol: '$', rate: 1 }
+    }
     if (currency.quotaDisplayType === 'CNY') {
       return { symbol: '¥', rate: currency.usdExchangeRate || 7 }
     }
@@ -173,7 +184,7 @@ export function DynamicPricingBreakdown({
       }
     }
     return { symbol: '$', rate: 1 }
-  }, [currency])
+  }, [currency, displayCurrency, usdExchangeRate])
 
   const { tiers, ruleGroups } = useMemo(() => {
     const split = splitBillingExprAndRequestRules(expr)

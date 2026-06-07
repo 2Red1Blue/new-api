@@ -1,10 +1,13 @@
 package claude
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -42,6 +45,89 @@ func maybeMarkClaudeRefusal(c *gin.Context, stopReason string) {
 	if strings.EqualFold(stopReason, "refusal") {
 		common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "claude_stop_reason=refusal")
 	}
+}
+
+func splitBase64Payload(data string) (string, string) {
+	if !strings.HasPrefix(data, "data:") {
+		return data, ""
+	}
+	idx := strings.Index(data, ",")
+	if idx < 0 {
+		return data, ""
+	}
+	header := data[:idx]
+	payload := data[idx+1:]
+	mimeType := ""
+	if strings.HasPrefix(header, "data:") {
+		mimeType = strings.TrimPrefix(header, "data:")
+		if semi := strings.Index(mimeType, ";"); semi >= 0 {
+			mimeType = mimeType[:semi]
+		}
+	}
+	return payload, mimeType
+}
+
+func isClaudeTextFile(mimeType string, ext string) bool {
+	mimeType = strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	ext = strings.ToLower(ext)
+	if strings.HasPrefix(mimeType, "text/") {
+		return true
+	}
+	switch mimeType {
+	case "application/json", "application/jsonl", "application/javascript", "application/xml", "application/x-yaml", "application/yaml":
+		return true
+	}
+	switch ext {
+	case ".txt", ".md", ".markdown", ".json", ".jsonl", ".csv", ".tsv", ".xml", ".yaml", ".yml", ".log", ".html", ".css", ".js", ".jsx", ".ts", ".tsx", ".py", ".go", ".java", ".c", ".cpp", ".h", ".hpp", ".rs", ".sh", ".sql":
+		return true
+	}
+	return false
+}
+
+func openAIFileContentToClaudeMessages(c *gin.Context, mediaMessage dto.MediaContent) ([]dto.ClaudeMediaMessage, error) {
+	file := mediaMessage.GetFile()
+	if file == nil || file.FileData == "" {
+		return nil, nil
+	}
+	payload, dataMimeType := splitBase64Payload(file.FileData)
+	ext := strings.ToLower(filepath.Ext(file.FileName))
+	mimeType := strings.TrimSpace(mime.TypeByExtension(ext))
+	if dataMimeType != "" {
+		mimeType = dataMimeType
+	}
+	normalizedMimeType := strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+
+	if normalizedMimeType == "application/pdf" || ext == ".pdf" {
+		base64Data, _, err := service.GetBase64Data(c, types.NewFileSourceFromData(file.FileData, "application/pdf"), "formatting document for Claude")
+		if err != nil {
+			return nil, fmt.Errorf("get file data failed: %s", err.Error())
+		}
+		return []dto.ClaudeMediaMessage{
+			{
+				Type: "document",
+				Source: &dto.ClaudeMessageSource{
+					Type:      "base64",
+					MediaType: "application/pdf",
+					Data:      base64Data,
+				},
+			},
+		}, nil
+	}
+
+	if isClaudeTextFile(mimeType, ext) {
+		decodedData, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return nil, fmt.Errorf("decode text file data failed: %s", err.Error())
+		}
+		return []dto.ClaudeMediaMessage{
+			{
+				Type: "text",
+				Text: common.GetPointer[string](string(decodedData)),
+			},
+		}, nil
+	}
+
+	return nil, nil
 }
 
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
@@ -380,6 +466,12 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 								Text: common.GetPointer[string](mediaMessage.Text),
 							})
 						}
+					case dto.ContentTypeFile:
+						fileMessages, err := openAIFileContentToClaudeMessages(c, mediaMessage)
+						if err != nil {
+							return nil, err
+						}
+						claudeMediaMessages = append(claudeMediaMessages, fileMessages...)
 					default:
 						source := mediaMessage.ToFileSource()
 						if source == nil {

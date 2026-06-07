@@ -61,6 +61,7 @@ export function Pricing() {
     endpointTypeFilter,
     tagFilter,
     tokenUnit,
+    currency,
     viewMode,
     showRechargePrice,
     setSearchInput,
@@ -71,6 +72,7 @@ export function Pricing() {
     setEndpointTypeFilter,
     setTagFilter,
     setTokenUnit,
+    setCurrency,
     setViewMode,
     setShowRechargePrice,
     filteredModels,
@@ -127,6 +129,7 @@ export function Pricing() {
           priceRate={priceRate}
           usdExchangeRate={usdExchangeRate}
           tokenUnit={tokenUnit}
+          currency={currency}
           showRechargePrice={showRechargePrice}
         />
       )
@@ -138,6 +141,7 @@ export function Pricing() {
         priceRate={priceRate}
         usdExchangeRate={usdExchangeRate}
         tokenUnit={tokenUnit}
+        currency={currency}
         showRechargePrice={showRechargePrice}
         onModelClick={handleModelClick}
       />
@@ -228,6 +232,8 @@ export function Pricing() {
                 onSortChange={setSortBy}
                 tokenUnit={tokenUnit}
                 onTokenUnitChange={setTokenUnit}
+                currency={currency}
+                onCurrencyChange={setCurrency}
                 showRechargePrice={showRechargePrice}
                 onRechargePriceChange={setShowRechargePrice}
                 viewMode={viewMode}
@@ -275,6 +281,7 @@ export function Pricing() {
               priceRate={priceRate ?? 1}
               usdExchangeRate={usdExchangeRate ?? 1}
               tokenUnit={tokenUnit}
+              currency={currency}
               showRechargePrice={showRechargePrice}
             />
           )}

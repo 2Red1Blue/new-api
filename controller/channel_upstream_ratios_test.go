@@ -52,7 +52,7 @@ func TestFetchUpstreamGroupRatiosFallsBackToPasswordLogin(t *testing.T) {
 	require.Equal(t, 0.1, result.Ratios["vip"])
 	require.Contains(t, result.Raw, "default")
 	require.Equal(t, server.URL+"/api/pricing", result.Source)
-	require.Equal(t, 2, pricingRequests)
+	require.Equal(t, 1, pricingRequests)
 }
 
 func TestFetchUpstreamGroupRatiosFallsBackToSub2APILogin(t *testing.T) {

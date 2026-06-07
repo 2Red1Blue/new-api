@@ -21,7 +21,7 @@ import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -189,7 +189,11 @@ export function RechargeFormCard({
   return (
     <TitledCard
       title={t('Add Funds')}
-      description={t('Choose an amount and payment method')}
+      description={
+        hasAnyTopup
+          ? t('Choose an amount and payment method')
+          : t('Buy a redemption card code and redeem it here')
+      }
       icon={<WalletCards className='h-4 w-4' />}
       action={
         onOpenBilling ? (
@@ -420,11 +424,17 @@ export function RechargeFormCard({
           )}
         </div>
       ) : (
-        <Alert>
+        <Alert className='border-amber-500/25 bg-amber-500/5'>
+          <Gift className='h-4 w-4 text-amber-600' />
+          <AlertTitle>{t('Top up with a redemption card code')}</AlertTitle>
           <AlertDescription>
-            {t(
-              'Online topup is not enabled. Please use redemption code or contact administrator.'
-            )}
+            {topupLink
+              ? t(
+                  'Yunxi AI currently adds balance through redemption card codes. Buy a code from Liandong Shop, then paste it below to redeem.'
+                )
+              : t(
+                  'Online topup is not enabled. Please use redemption code or contact administrator.'
+                )}
           </AlertDescription>
         </Alert>
       )}
@@ -448,13 +458,74 @@ export function RechargeFormCard({
       {/* Redemption Code Section */}
       {redemptionEnabled ? (
         <div className='space-y-2.5 border-t pt-4 sm:space-y-3 sm:pt-6'>
+          {topupLink && (
+            <div className='border-primary/20 from-primary/10 via-primary/5 to-background rounded-xl border bg-gradient-to-br p-3 shadow-sm sm:p-4'>
+              <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                <div className='flex min-w-0 gap-3'>
+                  <div className='bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-full'>
+                    <Gift className='h-5 w-5' />
+                  </div>
+                  <div className='space-y-1'>
+                    <p className='text-sm font-semibold'>
+                      {t('Need balance? Buy a redemption card code first')}
+                    </p>
+                    <p className='text-muted-foreground text-sm'>
+                      {t(
+                        'Click the button to open Liandong Shop, choose a Yunxi points product, complete payment, then copy the card code back here.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size='lg'
+                  className='w-full gap-2 sm:w-auto'
+                  render={
+                    <a
+                      href={topupLink}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                    />
+                  }
+                >
+                  {t('Open Liandong Shop')}
+                  <ExternalLink className='h-4 w-4' />
+                </Button>
+              </div>
+              <div className='mt-3 grid gap-2 text-xs sm:grid-cols-3'>
+                <div className='bg-background/70 rounded-lg border px-3 py-2'>
+                  <span className='text-primary font-medium'>
+                    {t('Step 1')}
+                  </span>
+                  <p className='text-muted-foreground mt-1'>
+                    {t('Choose a Yunxi points product')}
+                  </p>
+                </div>
+                <div className='bg-background/70 rounded-lg border px-3 py-2'>
+                  <span className='text-primary font-medium'>
+                    {t('Step 2')}
+                  </span>
+                  <p className='text-muted-foreground mt-1'>
+                    {t('Copy the delivered card code')}
+                  </p>
+                </div>
+                <div className='bg-background/70 rounded-lg border px-3 py-2'>
+                  <span className='text-primary font-medium'>
+                    {t('Step 3')}
+                  </span>
+                  <p className='text-muted-foreground mt-1'>
+                    {t('Paste it below and redeem')}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <div className='flex items-center gap-2'>
             <Gift className='text-muted-foreground h-4 w-4' />
             <Label
               htmlFor='redemption-code'
               className='text-muted-foreground text-xs font-medium tracking-wider uppercase'
             >
-              {t('Have a Code?')}
+              {t('Redeem card code')}
             </Label>
           </div>
           <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
@@ -477,14 +548,14 @@ export function RechargeFormCard({
           </div>
           {topupLink && (
             <p className='text-muted-foreground text-xs'>
-              {t('Need a redemption code?')}{' '}
+              {t('Already opened the shop?')}{' '}
               <a
                 href={topupLink}
                 target='_blank'
                 rel='noopener noreferrer'
                 className='inline-flex items-center gap-1 underline-offset-4 hover:underline'
               >
-                {t('Get one here')}
+                {t('Open Liandong Shop again')}
                 <ExternalLink className='h-3 w-3' />
               </a>
             </p>

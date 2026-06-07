@@ -16,6 +16,7 @@ web/dist
 .env.local-db
 .env.remote-db
 .env.server-yunxi
+.env.goland
 one-api
 new-api
 /__debug_bin*

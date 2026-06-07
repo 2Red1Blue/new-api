@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { type TFunction } from 'i18next'
-import type { TokenUnit } from './types'
+import type { PricingCurrency, TokenUnit } from './types'
 
 // ----------------------------------------------------------------------------
 // Pricing Constants
@@ -131,6 +131,9 @@ export const TOKEN_UNIT_DIVISORS = {
 
 /** Default token unit for pricing display */
 export const DEFAULT_TOKEN_UNIT: TokenUnit = 'M'
+
+/** Default currency for pricing display */
+export const DEFAULT_PRICING_CURRENCY: PricingCurrency = 'USD'
 
 /** View mode options */
 export const VIEW_MODES = {
