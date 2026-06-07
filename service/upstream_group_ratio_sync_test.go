@@ -239,3 +239,39 @@ func TestSyncChannelUpstreamGroupRatioClearsRPMWhenGroupNameEmpty(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, 0, savedChannel.GetOtherSettings().UpstreamRPMLimit)
 }
+
+func TestSyncChannelUpstreamGroupRatioKeepsExistingTopupRatio(t *testing.T) {
+	setupUpstreamGroupRatioSyncTestDB(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ratio_config":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group_ratio":{"default":0.5}}}`))
+		case "/api/status":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"topup_ratio":9}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"success":false,"message":"not found"}`))
+		}
+	}))
+	defer server.Close()
+
+	profile := &model.ChannelUpstreamProfile{
+		ChannelId:          504,
+		KeyFingerprint:     "test-fingerprint-keep-topup",
+		KeyMasked:          "sk-t...test",
+		UpstreamLoginUrl:   server.URL,
+		UpstreamGroup:      "default",
+		UpstreamTopupRatio: 2,
+		CreatedAt:          common.GetTimestamp(),
+		UpdatedAt:          common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(profile).Error)
+
+	require.NoError(t, syncChannelUpstreamGroupRatio(context.Background(), profile))
+
+	var savedProfile model.ChannelUpstreamProfile
+	require.NoError(t, model.DB.First(&savedProfile, profile.Id).Error)
+	require.Equal(t, 0.5, savedProfile.UpstreamGroupRatio)
+	require.Equal(t, 2.0, savedProfile.UpstreamTopupRatio)
+}

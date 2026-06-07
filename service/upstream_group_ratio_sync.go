@@ -42,17 +42,16 @@ func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUp
 		currentGroupDetail, hasCurrentGroupDetail = fetched.Details[groupName]
 	}
 
-	topupRatio := profile.UpstreamTopupRatio
-	if tr, ok, _ := FetchUpstreamTopupRatio(ctx, client, baseURL); ok && tr > 0 {
-		topupRatio = tr
-	}
-
 	now := common.GetTimestamp()
 	updates := map[string]any{
 		"upstream_group_ratio":  groupRatio,
-		"upstream_topup_ratio":  topupRatio,
 		"upstream_group_ratios": fetched.Raw,
 		"updated_at":            now,
+	}
+	if profile.UpstreamTopupRatio == 0 {
+		if tr, ok, _ := FetchUpstreamTopupRatio(ctx, client, baseURL); ok && tr > 0 {
+			updates["upstream_topup_ratio"] = tr
+		}
 	}
 
 	if err := model.DB.Model(&model.ChannelUpstreamProfile{}).

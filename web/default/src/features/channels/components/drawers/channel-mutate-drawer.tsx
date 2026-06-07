@@ -881,7 +881,11 @@ export function ChannelMutateDrawer({
       }
 
       const fetchedTopupRatio = response.data.topup_ratio
+      const currentTopupRatio = Number(
+        form.getValues('upstream_topup_ratio') || 0
+      )
       if (
+        currentTopupRatio === 0 &&
         typeof fetchedTopupRatio === 'number' &&
         Number.isFinite(fetchedTopupRatio) &&
         fetchedTopupRatio > 0
