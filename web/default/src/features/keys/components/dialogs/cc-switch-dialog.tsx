@@ -213,6 +213,7 @@ export function CCSwitchDialog(props: Props) {
               }
               placeholder={t('Select or enter model name')}
               emptyText={t('No models found')}
+              allowCustomValue={true}
             />
           </div>
         ))}
