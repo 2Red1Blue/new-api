@@ -22,7 +22,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 import { useStatus } from '@/hooks/use-status'
 
-const DEFAULT_DOCS_LINK = 'https://doc.laiber.cloud'
+const DEFAULT_DOCS_LINK = 'https://docs.laiber.cloud'
 
 export type TopNavLink = {
   title: string

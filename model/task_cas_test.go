@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -77,6 +78,50 @@ func insertTask(t *testing.T, task *Task) {
 	task.CreatedAt = time.Now().Unix()
 	task.UpdatedAt = time.Now().Unix()
 	require.NoError(t, DB.Create(task).Error)
+}
+
+func TestRecordUpstreamGroupRatioSyncFailureSanitizesURLAndUpdatesProfile(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, RecordUpstreamGroupRatioSyncFailure(
+		12,
+		345,
+		"vip",
+		" https://user:pass@example.com:8443/login?token=secret#fragment ",
+		errors.New("first failure"),
+	))
+	require.NoError(t, RecordUpstreamGroupRatioSyncFailure(
+		12,
+		345,
+		"vip",
+		"https://user:pass@example.com:8443/login?token=second#fragment",
+		errors.New("second failure"),
+	))
+
+	var tasks []Task
+	require.NoError(t, DB.Order("id").Find(&tasks).Error)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "https://example.com:8443/login", tasks[0].Properties.Input)
+	assert.Equal(t, "second failure", tasks[0].FailReason)
+	assert.NotContains(t, string(tasks[0].Data), "token=")
+	assert.NotContains(t, string(tasks[0].Data), "user:pass")
+
+	var data upstreamGroupRatioSyncFailureData
+	require.NoError(t, tasks[0].GetData(&data))
+	assert.EqualValues(t, 12, data.ChannelID)
+	assert.EqualValues(t, 345, data.ProfileID)
+	assert.Equal(t, "https://example.com:8443/login", data.UpstreamURL)
+
+	require.NoError(t, RecordUpstreamGroupRatioSyncFailure(
+		12,
+		346,
+		"vip",
+		"https://example.com/login?token=third",
+		errors.New("third failure"),
+	))
+	var count int64
+	require.NoError(t, DB.Model(&Task{}).Count(&count).Error)
+	assert.EqualValues(t, 2, count)
 }
 
 // ---------------------------------------------------------------------------

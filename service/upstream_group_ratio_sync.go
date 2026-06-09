@@ -109,6 +109,16 @@ func SyncAllChannelUpstreamGroupRatios(ctx context.Context, batchSize int) (sync
 			if syncErr := syncChannelUpstreamGroupRatio(ctx, &profiles[i]); syncErr != nil {
 				common.SysLog(fmt.Sprintf("sync upstream group ratio failed for channel #%d profile #%d: %s",
 					profiles[i].ChannelId, profiles[i].Id, syncErr.Error()))
+				if recordErr := model.RecordUpstreamGroupRatioSyncFailure(
+					profiles[i].ChannelId,
+					profiles[i].Id,
+					profiles[i].UpstreamGroup,
+					profiles[i].UpstreamLoginUrl,
+					syncErr,
+				); recordErr != nil {
+					common.SysLog(fmt.Sprintf("record upstream group ratio sync failure task failed for channel #%d profile #%d: %s",
+						profiles[i].ChannelId, profiles[i].Id, recordErr.Error()))
+				}
 				failed++
 			} else {
 				synced++
@@ -117,6 +127,9 @@ func SyncAllChannelUpstreamGroupRatios(ctx context.Context, batchSize int) (sync
 		if len(profiles) < batchSize {
 			break
 		}
+	}
+	if _, cleanupErr := model.CleanupExpiredUpstreamGroupRatioSyncFailureTasks(); cleanupErr != nil {
+		common.SysLog("cleanup upstream group ratio sync failure tasks failed: " + cleanupErr.Error())
 	}
 	return synced, failed, nil
 }

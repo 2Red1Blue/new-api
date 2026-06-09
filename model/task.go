@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -40,6 +42,16 @@ const (
 	TaskStatusSuccess               = "SUCCESS"
 	TaskStatusUnknown               = "UNKNOWN"
 )
+
+const systemTaskFailureRetentionSeconds = 7 * 24 * 3600
+
+type upstreamGroupRatioSyncFailureData struct {
+	ChannelID     int    `json:"channel_id"`
+	ProfileID     int64  `json:"profile_id"`
+	UpstreamGroup string `json:"upstream_group"`
+	UpstreamURL   string `json:"upstream_url"`
+	Error         string `json:"error"`
+}
 
 type Task struct {
 	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
@@ -361,6 +373,113 @@ func (Task *Task) Insert() error {
 	var err error
 	err = DB.Create(Task).Error
 	return err
+}
+
+func RecordUpstreamGroupRatioSyncFailure(channelID int, profileID int64, upstreamGroup string, baseURL string, syncErr error) error {
+	if syncErr == nil {
+		return nil
+	}
+
+	now := common.GetTimestamp()
+	errorText := syncErr.Error()
+	upstreamGroup = strings.TrimSpace(upstreamGroup)
+	baseURL = sanitizeTaskURL(baseURL)
+
+	task := findRecentUpstreamGroupRatioSyncFailureTask(channelID, profileID)
+	if task == nil {
+		task = &Task{
+			CreatedAt: now,
+			TaskID:    GenerateTaskID(),
+			Platform:  constant.TaskPlatformSystem,
+			ChannelId: channelID,
+			Action:    constant.TaskActionUpstreamGroupRatioSync,
+			Status:    TaskStatusFailure,
+		}
+	}
+
+	task.UpdatedAt = now
+	task.Group = upstreamGroup
+	task.FailReason = errorText
+	task.SubmitTime = now
+	task.StartTime = now
+	task.FinishTime = now
+	task.Progress = "100%"
+	task.Properties = Properties{
+		Input: baseURL,
+	}
+	task.SetData(upstreamGroupRatioSyncFailureData{
+		ChannelID:     channelID,
+		ProfileID:     profileID,
+		UpstreamGroup: upstreamGroup,
+		UpstreamURL:   baseURL,
+		Error:         errorText,
+	})
+
+	if task.ID != 0 {
+		return task.Update()
+	}
+	return task.Insert()
+}
+
+func findRecentUpstreamGroupRatioSyncFailureTask(channelID int, profileID int64) *Task {
+	if profileID <= 0 {
+		return nil
+	}
+	var tasks []*Task
+	if err := DB.
+		Where("channel_id = ?", channelID).
+		Where("platform = ?", constant.TaskPlatformSystem).
+		Where("action = ?", constant.TaskActionUpstreamGroupRatioSync).
+		Where("status = ?", TaskStatusFailure).
+		Order("id DESC").
+		Limit(100).
+		Find(&tasks).Error; err != nil {
+		return nil
+	}
+	for _, task := range tasks {
+		var data upstreamGroupRatioSyncFailureData
+		if err := task.GetData(&data); err != nil {
+			continue
+		}
+		if data.ProfileID == profileID {
+			return task
+		}
+	}
+	return nil
+}
+
+func sanitizeTaskURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return stripURLSuffix(rawURL)
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func stripURLSuffix(rawURL string) string {
+	if idx := strings.IndexAny(rawURL, "?#"); idx >= 0 {
+		return rawURL[:idx]
+	}
+	return rawURL
+}
+
+func CleanupExpiredUpstreamGroupRatioSyncFailureTasks() (int64, error) {
+	cutoff := common.GetTimestamp() - systemTaskFailureRetentionSeconds
+	result := DB.
+		Where("platform = ?", constant.TaskPlatformSystem).
+		Where("action = ?", constant.TaskActionUpstreamGroupRatioSync).
+		Where("status = ?", TaskStatusFailure).
+		Where("submit_time < ?", cutoff).
+		Delete(&Task{})
+	return result.RowsAffected, result.Error
 }
 
 type taskSnapshot struct {
