@@ -139,6 +139,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	relayInfo.MarkTiming("relay_info_ready")
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
@@ -149,6 +150,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
 	}
+	relayInfo.MarkTiming("token_meta_ready")
 
 	if needSensitiveCheck && meta != nil {
 		contains, words := service.CheckSensitiveText(meta.CombineText)
@@ -158,12 +160,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 	}
+	relayInfo.MarkTiming("sensitive_check_done")
 
 	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)
 		return
 	}
+	relayInfo.MarkTiming("estimate_tokens_done")
 
 	relayInfo.SetEstimatePromptTokens(tokens)
 
@@ -172,6 +176,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		return
 	}
+	relayInfo.MarkTiming("price_ready")
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
@@ -183,6 +188,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 	}
+	relayInfo.MarkTiming("preconsume_done")
 
 	defer func() {
 		// Only return quota if downstream failed and quota was actually pre-consumed
@@ -210,6 +216,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		c.Set(channelRateLimitedContextKey, false)
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
+		relayInfo.MarkTiming(fmt.Sprintf("retry_%d_channel_ready", retryParam.GetRetry()))
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
@@ -231,6 +238,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		relayInfo.MarkTiming(fmt.Sprintf("retry_%d_body_ready", retryParam.GetRetry()))
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:

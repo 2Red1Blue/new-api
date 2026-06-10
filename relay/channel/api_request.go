@@ -514,7 +514,13 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	if info != nil {
+		info.MarkTiming("upstream_client_do_start")
+	}
 	resp, err := client.Do(req)
+	if info != nil {
+		info.MarkTiming("upstream_client_do_done")
+	}
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))

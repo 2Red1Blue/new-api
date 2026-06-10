@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type ThinkingContentInfo struct {
@@ -96,6 +98,8 @@ type RelayInfo struct {
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
+	timingMu          sync.Mutex
+	TimingMarks       map[string]time.Time
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -658,12 +662,48 @@ func (info *RelayInfo) GetEstimatePromptTokens() int {
 func (info *RelayInfo) SetFirstResponseTime() {
 	if info.isFirstResponse {
 		info.FirstResponseTime = time.Now()
+		info.MarkTiming("first_response")
 		info.isFirstResponse = false
 	}
 }
 
 func (info *RelayInfo) HasSendResponse() bool {
 	return info.FirstResponseTime.After(info.StartTime)
+}
+
+func (info *RelayInfo) MarkTiming(stage string) {
+	if info == nil || stage == "" {
+		return
+	}
+	info.timingMu.Lock()
+	defer info.timingMu.Unlock()
+	if info.TimingMarks == nil {
+		info.TimingMarks = make(map[string]time.Time)
+	}
+	info.TimingMarks[stage] = time.Now()
+}
+
+func (info *RelayInfo) TimingSinceStartMs() map[string]int64 {
+	if info == nil {
+		return nil
+	}
+	info.timingMu.Lock()
+	defer info.timingMu.Unlock()
+	if len(info.TimingMarks) == 0 {
+		return nil
+	}
+	start := info.StartTime
+	if start.IsZero() {
+		start = time.Now()
+	}
+	result := make(map[string]int64, len(info.TimingMarks))
+	for stage, markedAt := range info.TimingMarks {
+		if markedAt.IsZero() {
+			continue
+		}
+		result[stage] = markedAt.Sub(start).Milliseconds()
+	}
+	return result
 }
 
 type TaskRelayInfo struct {
@@ -793,77 +833,89 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
 		return jsonData, nil
 	}
-	if !hasRemovableDisabledField(jsonData, channelOtherSettings) {
-		return jsonData, nil
-	}
-
-	var data map[string]interface{}
-	if err := common.Unmarshal(jsonData, &data); err != nil {
-		common.SysError("RemoveDisabledFields Unmarshal error :" + err.Error())
-		return jsonData, nil
+	values := removableDisabledFieldValues(jsonData)
+	result := jsonData
+	deletePath := func(path string) bool {
+		next, err := sjson.DeleteBytes(result, path)
+		if err != nil {
+			common.SysError("RemoveDisabledFields Delete error :" + err.Error())
+			return false
+		}
+		result = next
+		return true
 	}
 
 	// 默认移除 service_tier，除非明确允许（避免额外计费风险）
-	if !channelOtherSettings.AllowServiceTier {
-		if _, exists := data["service_tier"]; exists {
-			delete(data, "service_tier")
+	if !channelOtherSettings.AllowServiceTier && values[0].Exists() {
+		if !deletePath("service_tier") {
+			return jsonData, nil
 		}
 	}
 
 	// 默认移除 inference_geo，除非明确允许（避免在未授权情况下透传数据驻留区域）
-	if !channelOtherSettings.AllowInferenceGeo {
-		if _, exists := data["inference_geo"]; exists {
-			delete(data, "inference_geo")
+	if !channelOtherSettings.AllowInferenceGeo && values[1].Exists() {
+		if !deletePath("inference_geo") {
+			return jsonData, nil
 		}
 	}
 
 	// 默认移除 speed，除非明确允许（避免意外切换 Claude 推理速度模式）
-	if !channelOtherSettings.AllowSpeed {
-		if _, exists := data["speed"]; exists {
-			delete(data, "speed")
+	if !channelOtherSettings.AllowSpeed && values[2].Exists() {
+		if !deletePath("speed") {
+			return jsonData, nil
 		}
 	}
 
 	// 默认允许 store 透传，除非明确禁用（禁用可能影响 Codex 使用）
-	if channelOtherSettings.DisableStore {
-		if _, exists := data["store"]; exists {
-			delete(data, "store")
+	if channelOtherSettings.DisableStore && values[3].Exists() {
+		if !deletePath("store") {
+			return jsonData, nil
 		}
 	}
 
 	// 默认移除 safety_identifier，除非明确允许（保护用户隐私，避免向 OpenAI 报告用户信息）
-	if !channelOtherSettings.AllowSafetyIdentifier {
-		if _, exists := data["safety_identifier"]; exists {
-			delete(data, "safety_identifier")
+	if !channelOtherSettings.AllowSafetyIdentifier && values[4].Exists() {
+		if !deletePath("safety_identifier") {
+			return jsonData, nil
 		}
 	}
 
 	// 默认移除 stream_options.include_obfuscation，除非明确允许（避免关闭响应流混淆保护）
-	if !channelOtherSettings.AllowIncludeObfuscation {
-		if streamOptionsAny, exists := data["stream_options"]; exists {
-			if streamOptions, ok := streamOptionsAny.(map[string]interface{}); ok {
-				if _, includeExists := streamOptions["include_obfuscation"]; includeExists {
-					delete(streamOptions, "include_obfuscation")
-				}
-				if len(streamOptions) == 0 {
-					delete(data, "stream_options")
-				} else {
-					data["stream_options"] = streamOptions
+	if !channelOtherSettings.AllowIncludeObfuscation && values[5].Exists() {
+		if !deletePath("stream_options.include_obfuscation") {
+			return jsonData, nil
+		}
+		streamOptions := gjson.GetBytes(result, "stream_options")
+		if streamOptions.Exists() {
+			hasChild := false
+			streamOptions.ForEach(func(_, _ gjson.Result) bool {
+				hasChild = true
+				return false
+			})
+			if !hasChild {
+				if !deletePath("stream_options") {
+					return jsonData, nil
 				}
 			}
 		}
 	}
 
-	jsonDataAfter, err := common.Marshal(data)
-	if err != nil {
-		common.SysError("RemoveDisabledFields Marshal error :" + err.Error())
-		return jsonData, nil
-	}
-	return jsonDataAfter, nil
+	return result, nil
 }
 
 func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings) bool {
-	values := gjson.GetManyBytes(
+	values := removableDisabledFieldValues(jsonData)
+
+	return (!channelOtherSettings.AllowServiceTier && values[0].Exists()) ||
+		(!channelOtherSettings.AllowInferenceGeo && values[1].Exists()) ||
+		(!channelOtherSettings.AllowSpeed && values[2].Exists()) ||
+		(channelOtherSettings.DisableStore && values[3].Exists()) ||
+		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
+		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
+}
+
+func removableDisabledFieldValues(jsonData []byte) []gjson.Result {
+	return gjson.GetManyBytes(
 		jsonData,
 		"service_tier",
 		"inference_geo",
@@ -872,13 +924,6 @@ func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.Channel
 		"safety_identifier",
 		"stream_options.include_obfuscation",
 	)
-
-	return (!channelOtherSettings.AllowServiceTier && values[0].Exists()) ||
-		(!channelOtherSettings.AllowInferenceGeo && values[1].Exists()) ||
-		(!channelOtherSettings.AllowSpeed && values[2].Exists()) ||
-		(channelOtherSettings.DisableStore && values[3].Exists()) ||
-		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
-		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
 }
 
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data
