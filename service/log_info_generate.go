@@ -50,6 +50,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if timing := relayInfo.TimingSinceStartMs(); len(timing) > 0 {
 		other["relay_timing_ms"] = timing
 	}
+	if timingMeta := relayInfo.TimingMetaSnapshot(); len(timingMeta) > 0 {
+		other["relay_timing_meta"] = timingMeta
+	}
 	if relayInfo.IsModelMapped {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = relayInfo.UpstreamModelName

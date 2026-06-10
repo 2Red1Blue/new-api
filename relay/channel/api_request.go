@@ -2,10 +2,12 @@ package channel
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
@@ -484,6 +486,66 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+func attachUpstreamHTTPTrace(req *http.Request, info *common.RelayInfo) *http.Request {
+	if req == nil || info == nil {
+		return req
+	}
+	info.SetTimingMeta("upstream_request_body_size", req.ContentLength)
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(_ httptrace.DNSStartInfo) {
+			info.MarkTiming("upstream_dns_start")
+		},
+		DNSDone: func(done httptrace.DNSDoneInfo) {
+			info.MarkTiming("upstream_dns_done")
+			if done.Err != nil {
+				info.SetTimingMeta("upstream_dns_error", done.Err.Error())
+			}
+		},
+		ConnectStart: func(network, addr string) {
+			info.MarkTiming("upstream_connect_start")
+			info.SetTimingMeta("upstream_connect_network", network)
+			info.SetTimingMeta("upstream_connect_addr", addr)
+		},
+		ConnectDone: func(_, _ string, err error) {
+			info.MarkTiming("upstream_connect_done")
+			if err != nil {
+				info.SetTimingMeta("upstream_connect_error", err.Error())
+			}
+		},
+		TLSHandshakeStart: func() {
+			info.MarkTiming("upstream_tls_start")
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			info.MarkTiming("upstream_tls_done")
+			if err != nil {
+				info.SetTimingMeta("upstream_tls_error", err.Error())
+			}
+		},
+		GotConn: func(connInfo httptrace.GotConnInfo) {
+			info.MarkTiming("upstream_got_conn")
+			info.SetTimingMeta("upstream_conn_reused", connInfo.Reused)
+			info.SetTimingMeta("upstream_conn_was_idle", connInfo.WasIdle)
+			if connInfo.WasIdle {
+				info.SetTimingMeta("upstream_conn_idle_ms", connInfo.IdleTime.Milliseconds())
+			}
+		},
+		WroteHeaders: func() {
+			info.MarkTiming("upstream_wrote_headers")
+		},
+		WroteRequest: func(writeInfo httptrace.WroteRequestInfo) {
+			info.MarkTiming("upstream_wrote_request")
+			if writeInfo.Err != nil {
+				info.SetTimingMeta("upstream_write_error", writeInfo.Err.Error())
+			}
+		},
+		GotFirstResponseByte: func() {
+			info.MarkTiming("upstream_first_response_byte")
+		},
+	}
+	return req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
@@ -517,6 +579,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if info != nil {
 		info.MarkTiming("upstream_client_do_start")
 	}
+	req = attachUpstreamHTTPTrace(req, info)
 	resp, err := client.Do(req)
 	if info != nil {
 		info.MarkTiming("upstream_client_do_done")

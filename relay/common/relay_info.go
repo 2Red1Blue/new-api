@@ -100,6 +100,7 @@ type RelayInfo struct {
 	isFirstResponse   bool
 	timingMu          sync.Mutex
 	TimingMarks       map[string]time.Time
+	TimingMeta        map[string]interface{}
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -702,6 +703,34 @@ func (info *RelayInfo) TimingSinceStartMs() map[string]int64 {
 			continue
 		}
 		result[stage] = markedAt.Sub(start).Milliseconds()
+	}
+	return result
+}
+
+func (info *RelayInfo) SetTimingMeta(key string, value interface{}) {
+	if info == nil || key == "" {
+		return
+	}
+	info.timingMu.Lock()
+	defer info.timingMu.Unlock()
+	if info.TimingMeta == nil {
+		info.TimingMeta = make(map[string]interface{})
+	}
+	info.TimingMeta[key] = value
+}
+
+func (info *RelayInfo) TimingMetaSnapshot() map[string]interface{} {
+	if info == nil {
+		return nil
+	}
+	info.timingMu.Lock()
+	defer info.timingMu.Unlock()
+	if len(info.TimingMeta) == 0 {
+		return nil
+	}
+	result := make(map[string]interface{}, len(info.TimingMeta))
+	for key, value := range info.TimingMeta {
+		result[key] = value
 	}
 	return result
 }
