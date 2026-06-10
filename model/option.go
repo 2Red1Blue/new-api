@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,33 @@ import (
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
+}
+
+func parseQuotaOptionValue(value string) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0
+	}
+
+	if strings.ContainsAny(trimmed, ".eE") {
+		floatValue, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) || floatValue < 0 {
+			return 0
+		}
+		return int(math.Round(floatValue * common.QuotaPerUnit))
+	}
+
+	intValue, err := strconv.Atoi(trimmed)
+	if err != nil || intValue < 0 {
+		return 0
+	}
+	return intValue
+}
+
+func setQuotaOptionValue(key string, value string, target *int) {
+	quota := parseQuotaOptionValue(value)
+	*target = quota
+	common.OptionMap[key] = strconv.Itoa(quota)
 }
 
 func AllOption() ([]*Option, error) {
@@ -187,6 +215,19 @@ func InitOptionMap() {
 func loadOptionsFromDatabase() {
 	options, _ := AllOption()
 	for _, option := range options {
+		if option.Key != "QuotaPerUnit" {
+			continue
+		}
+		err := updateOptionMap(option.Key, option.Value)
+		if err != nil {
+			common.SysLog("failed to update option map: " + err.Error())
+		}
+		break
+	}
+	for _, option := range options {
+		if option.Key == "QuotaPerUnit" {
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
@@ -495,15 +536,15 @@ func updateOptionMap(key string, value string) (err error) {
 	case "TurnstileSecretKey":
 		common.TurnstileSecretKey = value
 	case "QuotaForNewUser":
-		common.QuotaForNewUser, _ = strconv.Atoi(value)
+		setQuotaOptionValue(key, value, &common.QuotaForNewUser)
 	case "QuotaForInviter":
-		common.QuotaForInviter, _ = strconv.Atoi(value)
+		setQuotaOptionValue(key, value, &common.QuotaForInviter)
 	case "QuotaForInvitee":
-		common.QuotaForInvitee, _ = strconv.Atoi(value)
+		setQuotaOptionValue(key, value, &common.QuotaForInvitee)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":
-		common.PreConsumedQuota, _ = strconv.Atoi(value)
+		setQuotaOptionValue(key, value, &common.PreConsumedQuota)
 	case "ModelRequestRateLimitCount":
 		setting.ModelRequestRateLimitCount, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitDurationMinutes":

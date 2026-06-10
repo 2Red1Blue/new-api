@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ChangeEvent } from 'react'
+import { useMemo, type ChangeEvent } from 'react'
 import * as z from 'zod'
 import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useTranslation } from 'react-i18next'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Form,
@@ -68,12 +69,33 @@ type QuotaSettingsSectionProps = {
   complianceConfirmed?: boolean
 }
 
+const quotaAmountKeys = new Set([
+  'QuotaForNewUser',
+  'PreConsumedQuota',
+  'QuotaForInviter',
+  'QuotaForInvitee',
+])
+
+function quotaAmountDefaults(values: QuotaFormValues): QuotaFormValues {
+  return {
+    ...values,
+    QuotaForNewUser: quotaUnitsToDollars(values.QuotaForNewUser),
+    PreConsumedQuota: quotaUnitsToDollars(values.PreConsumedQuota),
+    QuotaForInviter: quotaUnitsToDollars(values.QuotaForInviter),
+    QuotaForInvitee: quotaUnitsToDollars(values.QuotaForInvitee),
+  }
+}
+
 export function QuotaSettingsSection({
   defaultValues,
   complianceConfirmed = true,
 }: QuotaSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const displayDefaultValues = useMemo(
+    () => quotaAmountDefaults(defaultValues),
+    [defaultValues]
+  )
   const handleNumberChange =
     (onChange: (value: number | string) => void) =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -89,12 +111,15 @@ export function QuotaSettingsSection({
         unknown,
         QuotaFormValues
       >,
-      defaultValues,
+      defaultValues: displayDefaultValues,
       onSubmit: async (_data, changedFields) => {
         for (const [key, value] of Object.entries(changedFields)) {
           await updateOption.mutateAsync({
             key,
-            value: value as string | number | boolean,
+            value:
+              quotaAmountKeys.has(key) && typeof value === 'number'
+                ? parseQuotaFromDollars(value)
+                : (value as string | number | boolean),
           })
         }
       },
@@ -131,6 +156,8 @@ export function QuotaSettingsSection({
                   <FormControl>
                     <Input
                       type='number'
+                      step='0.01'
+                      min='0'
                       value={field.value ?? ''}
                       onChange={handleNumberChange(field.onChange)}
                       name={field.name}
@@ -155,6 +182,8 @@ export function QuotaSettingsSection({
                   <FormControl>
                     <Input
                       type='number'
+                      step='0.01'
+                      min='0'
                       value={field.value ?? ''}
                       onChange={handleNumberChange(field.onChange)}
                       name={field.name}
@@ -179,6 +208,8 @@ export function QuotaSettingsSection({
                   <FormControl>
                     <Input
                       type='number'
+                      step='0.01'
+                      min='0'
                       value={field.value ?? ''}
                       onChange={handleNumberChange(field.onChange)}
                       name={field.name}
@@ -203,6 +234,8 @@ export function QuotaSettingsSection({
                   <FormControl>
                     <Input
                       type='number'
+                      step='0.01'
+                      min='0'
                       value={field.value ?? ''}
                       onChange={handleNumberChange(field.onChange)}
                       name={field.name}
