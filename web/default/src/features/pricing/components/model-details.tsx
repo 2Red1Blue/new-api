@@ -32,16 +32,9 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CopyButton } from '@/components/copy-button'
+import { StaticDataTable } from '@/components/data-table'
 import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { GroupBadge } from '@/components/group-badge'
 import { PublicLayout } from '@/components/layout'
@@ -51,11 +44,7 @@ import {
   formatThroughput,
   formatUptimePct,
 } from '@/features/performance-metrics/lib/format'
-import {
-  DEFAULT_PRICING_CURRENCY,
-  DEFAULT_TOKEN_UNIT,
-  QUOTA_TYPE_VALUES,
-} from '../constants'
+import { DEFAULT_TOKEN_UNIT, QUOTA_TYPE_VALUES } from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
 import {
   getDynamicPriceEntries,
@@ -71,7 +60,6 @@ import type {
   Modality,
   ModelCapability,
   PriceType,
-  PricingCurrency,
   PricingModel,
   TokenUnit,
 } from '../types'
@@ -274,9 +262,7 @@ function ModelHeader(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const model = props.model
   const modelIconKey = model.icon || model.vendor_icon
-  const modelIcon = modelIconKey
-    ? getLobeIcon(modelIconKey, 20)
-    : null
+  const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 20) : null
   const description = model.description || model.vendor_description || null
   const tags = parseTags(model.tags)
   const isSpecialExpression =
@@ -351,7 +337,6 @@ function PriceSection(props: {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
-  currency?: PricingCurrency
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
@@ -364,7 +349,6 @@ function PriceSection(props: {
     showRechargePrice: props.showRechargePrice,
     priceRate: props.priceRate,
     usdExchangeRate: props.usdExchangeRate,
-    currency: props.currency,
     groupRatioMultiplier: 1,
   })
 
@@ -499,8 +483,7 @@ function PriceSection(props: {
               props.showRechargePrice,
               props.priceRate,
               props.usdExchangeRate,
-              baseGroupRatioMap,
-              props.currency
+              baseGroupRatioMap
             )}
           </span>
         </div>
@@ -519,8 +502,7 @@ function PriceSection(props: {
         props.showRechargePrice,
         props.priceRate,
         props.usdExchangeRate,
-        baseGroupRatioMap,
-        props.currency
+        baseGroupRatioMap
       )}
       <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
         / {tokenUnitLabel}
@@ -595,6 +577,40 @@ function AutoGroupChain(props: { model: PricingModel; autoGroups: string[] }) {
   )
 }
 
+type DynamicPriceOptions = Parameters<typeof getDynamicPriceEntries>[1]
+type DynamicPricingTier = ReturnType<typeof getDynamicPricingTiers>[number]
+type DynamicFormattedPricesByTier = Map<DynamicPricingTier, Map<string, string>>
+
+function getDynamicPriceFields(
+  tiers: DynamicPricingTier[],
+  options: DynamicPriceOptions
+) {
+  return Array.from(
+    new Map(
+      tiers
+        .flatMap((tier) => getDynamicPriceEntries(tier, options))
+        .map((entry) => [entry.field, entry])
+    ).values()
+  )
+}
+
+function getDynamicFormattedPricesByTier(
+  tiers: DynamicPricingTier[],
+  options: DynamicPriceOptions
+): DynamicFormattedPricesByTier {
+  return new Map(
+    tiers.map((tier) => [
+      tier,
+      new Map(
+        getDynamicPriceEntries(tier, options).map((entry) => [
+          entry.field,
+          entry.formatted,
+        ])
+      ),
+    ])
+  )
+}
+
 // ----------------------------------------------------------------------------
 // Group pricing table
 // ----------------------------------------------------------------------------
@@ -607,7 +623,6 @@ function GroupPricingSection(props: {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
-  currency?: PricingCurrency
   showRechargePrice?: boolean
 }) {
   const { t } = useTranslation()
@@ -686,21 +701,27 @@ function GroupPricingSection(props: {
       )
     }
 
-    const priceFields = Array.from(
-      new Map(
-        dynamicTiers
-          .flatMap((tier) =>
-            getDynamicPriceEntries(tier, {
-              tokenUnit: props.tokenUnit,
-              showRechargePrice,
-              priceRate: props.priceRate,
-              usdExchangeRate: props.usdExchangeRate,
-              currency: props.currency,
-              groupRatioMultiplier: 1,
-            })
-          )
-          .map((entry) => [entry.field, entry])
-      ).values()
+    const priceFields = getDynamicPriceFields(dynamicTiers, {
+      tokenUnit: props.tokenUnit,
+      showRechargePrice,
+      priceRate: props.priceRate,
+      usdExchangeRate: props.usdExchangeRate,
+      groupRatioMultiplier: 1,
+    })
+    const formattedPricesByGroup = new Map(
+      availableGroups.map((group) => {
+        const ratio = props.groupRatio[group] || 1
+        return [
+          group,
+          getDynamicFormattedPricesByTier(dynamicTiers, {
+            tokenUnit: props.tokenUnit,
+            showRechargePrice,
+            priceRate: props.priceRate,
+            usdExchangeRate: props.usdExchangeRate,
+            groupRatioMultiplier: ratio,
+          }),
+        ] as const
+      })
     )
 
     return (
@@ -710,6 +731,10 @@ function GroupPricingSection(props: {
         <div className='space-y-3'>
           {availableGroups.map((group) => {
             const ratio = props.groupRatio[group] || 1
+            const formattedPricesByTier =
+              formattedPricesByGroup.get(group) ??
+              new Map<DynamicPricingTier, Map<string, string>>()
+
             return (
               <div key={group} className='overflow-hidden rounded-lg border'>
                 <div className='bg-muted/20 flex items-center justify-between gap-3 border-b px-3 py-2'>
@@ -718,57 +743,34 @@ function GroupPricingSection(props: {
                     {ratio}x
                   </span>
                 </div>
-                <div className='overflow-x-auto'>
-                  <Table className='text-sm'>
-                    <TableHeader>
-                      <TableRow className='hover:bg-transparent'>
-                        <TableHead className={thClass}>{t('Tier')}</TableHead>
-                        {priceFields.map((entry) => (
-                          <TableHead
-                            key={entry.field}
-                            className={`${thClass} text-right`}
-                          >
-                            {t(entry.shortLabel)}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {dynamicTiers.map((tier, tierIndex) => {
-                        const entries = getDynamicPriceEntries(tier, {
-                          tokenUnit: props.tokenUnit,
-                          showRechargePrice,
-                          priceRate: props.priceRate,
-                          usdExchangeRate: props.usdExchangeRate,
-                          currency: props.currency,
-                          groupRatioMultiplier: ratio,
-                        })
-                        const entryMap = new Map(
-                          entries.map((entry) => [entry.field, entry])
-                        )
-
-                        return (
-                          <TableRow key={`${group}-${tier.label || tierIndex}`}>
-                            <TableCell className='text-muted-foreground py-2.5'>
-                              {tier.label || t('Default')}
-                            </TableCell>
-                            {priceFields.map((fieldEntry) => {
-                              const entry = entryMap.get(fieldEntry.field)
-                              return (
-                                <TableCell
-                                  key={fieldEntry.field}
-                                  className='py-2.5 text-right font-mono'
-                                >
-                                  {entry?.formatted ?? '-'}
-                                </TableCell>
-                              )
-                            })}
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                <StaticDataTable
+                  className='rounded-none border-0'
+                  tableClassName='text-sm'
+                  headerRowClassName='hover:bg-transparent'
+                  data={dynamicTiers}
+                  getRowKey={(tier, tierIndex) =>
+                    `${group}-${tier.label || tierIndex}`
+                  }
+                  columns={[
+                    {
+                      id: 'tier',
+                      header: t('Tier'),
+                      className: thClass,
+                      cellClassName: 'text-muted-foreground py-2.5',
+                      cell: (tier) => tier.label || t('Default'),
+                    },
+                    ...priceFields.map((fieldEntry) => ({
+                      id: fieldEntry.field,
+                      header: t(fieldEntry.shortLabel),
+                      className: `${thClass} text-right`,
+                      cellClassName: 'py-2.5 text-right font-mono',
+                      cell: (tier: (typeof dynamicTiers)[number]) =>
+                        formattedPricesByTier
+                          .get(tier)
+                          ?.get(fieldEntry.field) ?? '-',
+                    })),
+                  ]}
+                />
               </div>
             )
           })}
@@ -780,116 +782,88 @@ function GroupPricingSection(props: {
     )
   }
 
+  const renderGroupPrice = (group: string, type: PriceType) =>
+    formatGroupPrice(
+      props.model,
+      group,
+      type,
+      props.tokenUnit,
+      showRechargePrice,
+      props.priceRate,
+      props.usdExchangeRate,
+      props.groupRatio
+    )
+  const renderFixedGroupPrice = (group: string) =>
+    formatFixedPrice(
+      props.model,
+      group,
+      showRechargePrice,
+      props.priceRate,
+      props.usdExchangeRate,
+      props.groupRatio
+    )
+
   return (
     <section>
       <SectionTitle>{t('Pricing by Group')}</SectionTitle>
       <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
-      <div className='-mx-4 overflow-x-auto sm:mx-0'>
-        <Table className='text-sm'>
-          <TableHeader>
-            <TableRow className='hover:bg-transparent'>
-              <TableHead className={thClass}>{t('Group')}</TableHead>
-              <TableHead className={thClass}>{t('Ratio')}</TableHead>
-              {isTokenBased ? (
-                <>
-                  <TableHead className={`${thClass} text-right`}>
-                    {t('Input')}
-                  </TableHead>
-                  <TableHead className={`${thClass} text-right`}>
-                    {t('Output')}
-                  </TableHead>
-                  {extraPriceTypes.map((ep) => (
-                    <TableHead
-                      key={ep.type}
-                      className={`${thClass} text-right`}
-                    >
-                      {ep.label}
-                    </TableHead>
-                  ))}
-                </>
-              ) : (
-                <TableHead className={`${thClass} text-right`}>
-                  {t('Price')}
-                </TableHead>
-              )}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {availableGroups.map((group) => {
-              const ratio = props.groupRatio[group] || 1
-              return (
-                <TableRow key={group}>
-                  <TableCell className='py-2.5'>
-                    <GroupBadge group={group} size='sm' />
-                  </TableCell>
-                  <TableCell className='text-muted-foreground py-2.5 font-mono'>
-                    {ratio}x
-                  </TableCell>
-                  {isTokenBased ? (
-                    <>
-                      <TableCell className='py-2.5 text-right font-mono'>
-                        {formatGroupPrice(
-                          props.model,
-                          group,
-                          'input',
-                          props.tokenUnit,
-                          showRechargePrice,
-                          props.priceRate,
-                          props.usdExchangeRate,
-                          props.groupRatio,
-                          props.currency
-                        )}
-                      </TableCell>
-                      <TableCell className='py-2.5 text-right font-mono'>
-                        {formatGroupPrice(
-                          props.model,
-                          group,
-                          'output',
-                          props.tokenUnit,
-                          showRechargePrice,
-                          props.priceRate,
-                          props.usdExchangeRate,
-                          props.groupRatio,
-                          props.currency
-                        )}
-                      </TableCell>
-                      {extraPriceTypes.map((ep) => (
-                        <TableCell
-                          key={ep.type}
-                          className='py-2.5 text-right font-mono'
-                        >
-                          {formatGroupPrice(
-                            props.model,
-                            group,
-                            ep.type,
-                            props.tokenUnit,
-                            showRechargePrice,
-                            props.priceRate,
-                            props.usdExchangeRate,
-                            props.groupRatio,
-                            props.currency
-                          )}
-                        </TableCell>
-                      ))}
-                    </>
-                  ) : (
-                    <TableCell className='py-2.5 text-right font-mono'>
-                      {formatFixedPrice(
-                        props.model,
-                        group,
-                        showRechargePrice,
-                        props.priceRate,
-                        props.usdExchangeRate,
-                        props.groupRatio,
-                        props.currency
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+      <StaticDataTable
+        className='-mx-4 rounded-none border-0 sm:mx-0'
+        tableClassName='text-sm'
+        headerRowClassName='hover:bg-transparent'
+        data={availableGroups}
+        getRowKey={(group) => group}
+        columns={[
+          {
+            id: 'group',
+            header: t('Group'),
+            className: thClass,
+            cellClassName: 'py-2.5',
+            cell: (group) => <GroupBadge group={group} size='sm' />,
+          },
+          {
+            id: 'ratio',
+            header: t('Ratio'),
+            className: thClass,
+            cellClassName: 'text-muted-foreground py-2.5 font-mono',
+            cell: (group) => `${props.groupRatio[group] || 1}x`,
+          },
+          ...(isTokenBased
+            ? [
+                {
+                  id: 'input',
+                  header: t('Input'),
+                  className: `${thClass} text-right`,
+                  cellClassName: 'py-2.5 text-right font-mono',
+                  cell: (group: string) => renderGroupPrice(group, 'input'),
+                },
+                {
+                  id: 'output',
+                  header: t('Output'),
+                  className: `${thClass} text-right`,
+                  cellClassName: 'py-2.5 text-right font-mono',
+                  cell: (group: string) => renderGroupPrice(group, 'output'),
+                },
+                ...extraPriceTypes.map((ep) => ({
+                  id: ep.type,
+                  header: ep.label,
+                  className: `${thClass} text-right`,
+                  cellClassName: 'py-2.5 text-right font-mono',
+                  cell: (group: string) => renderGroupPrice(group, ep.type),
+                })),
+              ]
+            : [
+                {
+                  id: 'price',
+                  header: t('Price'),
+                  className: `${thClass} text-right`,
+                  cellClassName: 'py-2.5 text-right font-mono',
+                  cell: renderFixedGroupPrice,
+                },
+              ]),
+        ]}
+      />
+      <div className='-mx-4 sm:mx-0'>
         {isTokenBased && (
           <p className='text-muted-foreground/40 mt-1.5 px-4 text-[10px] sm:px-0'>
             {t('Prices shown per')} {tokenUnitLabel} tokens
@@ -921,7 +895,6 @@ export interface ModelDetailsContentProps {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
-  currency?: PricingCurrency
   showRechargePrice?: boolean
 }
 
@@ -965,15 +938,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
-              currency={props.currency}
               showRechargePrice={showRechargePrice}
             />
             {isDynamic && (
-              <DynamicPricingBreakdown
-                billingExpr={props.model.billing_expr}
-                currency={props.currency}
-                usdExchangeRate={props.usdExchangeRate}
-              />
+              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
             )}
             <GroupPricingSection
               model={props.model}
@@ -983,7 +951,6 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
-              currency={props.currency}
               showRechargePrice={showRechargePrice}
             />
           </section>
@@ -1066,8 +1033,6 @@ export function ModelDetails() {
 
   const tokenUnit: TokenUnit =
     search.tokenUnit === 'K' ? 'K' : DEFAULT_TOKEN_UNIT
-  const currency: PricingCurrency =
-    search.currency === 'CNY' ? 'CNY' : DEFAULT_PRICING_CURRENCY
 
   const model = useMemo(() => {
     if (!models || !modelId) return null
@@ -1142,7 +1107,6 @@ export function ModelDetails() {
           priceRate={priceRate ?? 1}
           usdExchangeRate={usdExchangeRate ?? 1}
           tokenUnit={tokenUnit}
-          currency={currency}
           showRechargePrice={search.rechargePrice ?? false}
           endpointMap={
             (endpointMap as Record<

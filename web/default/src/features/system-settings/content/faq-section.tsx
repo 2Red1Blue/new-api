@@ -45,15 +45,8 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { StaticDataTable } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
@@ -61,7 +54,6 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 type FAQ = {
   id: number
-  sort_order: number
   question: string
   answer: string
 }
@@ -72,11 +64,6 @@ type FAQSectionProps = {
 }
 
 const faqSchema = z.object({
-  sort_order: z
-    .number()
-    .int('Sort order must be an integer')
-    .min(0, 'Sort order must not be negative')
-    .max(9999, 'Sort order must be less than 10000'),
   question: z
     .string()
     .min(1, 'Question is required')
@@ -106,7 +93,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
   const form = useForm<FAQFormValues>({
     resolver: zodResolver(faqSchema),
     defaultValues: {
-      sort_order: 0,
       question: '',
       answer: '',
     },
@@ -120,8 +106,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
           parsed.map((item, idx) => ({
             ...item,
             id: item.id || idx + 1,
-            sort_order:
-              typeof item.sort_order === 'number' ? item.sort_order : idx + 1,
           }))
         )
       }
@@ -150,7 +134,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
   const handleAdd = () => {
     setEditingFaq(null)
     form.reset({
-      sort_order: faqList.length + 1,
       question: '',
       answer: '',
     })
@@ -160,7 +143,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
   const handleEdit = (faq: FAQ) => {
     setEditingFaq(faq)
     form.reset({
-      sort_order: faq.sort_order,
       question: faq.question,
       answer: faq.answer,
     })
@@ -243,12 +225,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
     )
   }
 
-  const sortedFaqList = [...faqList].sort((a, b) => {
-    const orderDiff = (a.sort_order ?? 0) - (b.sort_order ?? 0)
-    if (orderDiff !== 0) return orderDiff
-    return a.id - b.id
-  })
-
   return (
     <SettingsSection title={t('FAQ')}>
       <div className='space-y-4'>
@@ -286,82 +262,68 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
           />
         </div>
 
-        <div className='rounded-md border'>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className='w-12'>
-                  <Checkbox
-                    checked={
-                      selectedIds.length === faqList.length &&
-                      faqList.length > 0
-                    }
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </TableHead>
-                <TableHead className='w-28'>{t('Sort')}</TableHead>
-                <TableHead>{t('Question')}</TableHead>
-                <TableHead>{t('Answer')}</TableHead>
-                <TableHead className='w-32'>{t('Actions')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {faqList.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className='h-24 text-center'>
-                    {t('No FAQ entries yet. Click "Add FAQ" to create one.')}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sortedFaqList.map((faq) => (
-                  <TableRow key={faq.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedIds.includes(faq.id)}
-                        onCheckedChange={(checked) =>
-                          toggleSelectOne(faq.id, checked as boolean)
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className='text-muted-foreground font-mono text-xs'>
-                      {faq.sort_order}
-                    </TableCell>
-                    <TableCell
-                      className='max-w-xs truncate font-medium'
-                      title={faq.question}
-                    >
-                      {faq.question}
-                    </TableCell>
-                    <TableCell
-                      className='text-muted-foreground max-w-md truncate'
-                      title={faq.answer}
-                    >
-                      {faq.answer}
-                    </TableCell>
-                    <TableCell>
-                      <div className='flex gap-2'>
-                        <Button
-                          onClick={() => handleEdit(faq)}
-                          size='sm'
-                          variant='ghost'
-                        >
-                          <Edit className='h-4 w-4' />
-                        </Button>
-                        <Button
-                          onClick={() => handleDelete(faq)}
-                          size='sm'
-                          variant='ghost'
-                        >
-                          <Trash2 className='h-4 w-4' />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        <StaticDataTable
+          data={faqList}
+          getRowKey={(faq) => faq.id}
+          emptyContent={t('No FAQ entries yet. Click "Add FAQ" to create one.')}
+          columns={[
+            {
+              id: 'select',
+              header: (
+                <Checkbox
+                  checked={
+                    selectedIds.length === faqList.length && faqList.length > 0
+                  }
+                  onCheckedChange={toggleSelectAll}
+                />
+              ),
+              className: 'w-12',
+              cell: (faq) => (
+                <Checkbox
+                  checked={selectedIds.includes(faq.id)}
+                  onCheckedChange={(checked) =>
+                    toggleSelectOne(faq.id, checked as boolean)
+                  }
+                />
+              ),
+            },
+            {
+              id: 'question',
+              header: t('Question'),
+              cellClassName: 'max-w-xs truncate font-medium',
+              cell: (faq) => faq.question,
+            },
+            {
+              id: 'answer',
+              header: t('Answer'),
+              cellClassName: 'text-muted-foreground max-w-md truncate',
+              cell: (faq) => faq.answer,
+            },
+            {
+              id: 'actions',
+              header: t('Actions'),
+              className: 'w-32',
+              cell: (faq) => (
+                <div className='flex gap-2'>
+                  <Button
+                    onClick={() => handleEdit(faq)}
+                    size='sm'
+                    variant='ghost'
+                  >
+                    <Edit className='h-4 w-4' />
+                  </Button>
+                  <Button
+                    onClick={() => handleDelete(faq)}
+                    size='sm'
+                    variant='ghost'
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
+        />
       </div>
 
       <Dialog
@@ -393,31 +355,6 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
             onSubmit={form.handleSubmit(handleSubmitForm)}
             className='space-y-4'
           >
-            <FormField
-              control={form.control}
-              name='sort_order'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Sort')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      type='number'
-                      min='0'
-                      step='1'
-                      placeholder='1'
-                      value={field.value}
-                      onChange={(event) =>
-                        field.onChange(Number(event.target.value) || 0)
-                      }
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Lower values appear first on the dashboard.')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
             <FormField
               control={form.control}
               name='question'
