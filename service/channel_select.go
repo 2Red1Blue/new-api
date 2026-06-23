@@ -15,6 +15,7 @@ type RetryParam struct {
 	Ctx          *gin.Context
 	TokenGroup   string
 	ModelName    string
+	RequestPath  string
 	Retry        *int
 	Excluded     map[int]struct{}
 	Failures     map[int]int
@@ -61,7 +62,7 @@ func GetFirstAvailableChannelAcrossPriorities(group, modelName string, excludedC
 	}
 	var lastErr error
 	for retry := 0; retry < levelCount; retry++ {
-		ch, err := model.GetRandomSatisfiedChannelWithExclusions(group, modelName, retry, excludedChannelIDs)
+		ch, err := model.GetRandomSatisfiedChannelWithExclusions(group, modelName, retry, "", excludedChannelIDs)
 		if err != nil {
 			lastErr = err
 			continue
@@ -143,7 +144,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.ExcludedChannelIDs())
+			channel, _ = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ExcludedChannelIDs())
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -181,7 +182,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.ExcludedChannelIDs())
+		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, param.ExcludedChannelIDs())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

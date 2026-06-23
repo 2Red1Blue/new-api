@@ -53,6 +53,7 @@ export const channelFormSchema = z.object({
   header_override: z.string().optional(),
   settings: z.string().optional(),
   other: z.string().optional(),
+  advanced_custom: z.string().optional(),
   // Multi-key options (not sent to backend directly)
   multi_key_mode: z.enum(['single', 'batch', 'multi_to_single']).optional(),
   multi_key_type: z.enum(['random', 'polling']).optional(),
@@ -129,6 +130,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   header_override: '',
   settings: '{}',
   other: '',
+  advanced_custom: '',
   multi_key_mode: 'single',
   multi_key_type: 'random',
   batch_add_set_key_prefix_2_name: false,

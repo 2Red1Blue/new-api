@@ -122,6 +122,10 @@ type MonitoringSettingsSectionProps = {
     'monitor_setting.auto_test_channel_minutes': number
     'monitor_setting.auto_priority_scan_enabled': boolean
     'monitor_setting.auto_priority_scan_interval_hours': number
+    'perf_metrics_setting.enabled': boolean
+    'perf_metrics_setting.flush_interval': number
+    'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
+    'perf_metrics_setting.retention_days': number
   }
 }
 

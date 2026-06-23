@@ -10,10 +10,10 @@ import (
 func TestGetChannelWithExclusionsReturnsNilWhenPriorityFullyExcluded(t *testing.T) {
 	truncateTables(t)
 
-	originalSQLite := common.UsingSQLite
-	common.UsingSQLite = true
+	originalMainDBType := common.MainDatabaseType()
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	t.Cleanup(func() {
-		common.UsingSQLite = originalSQLite
+		common.SetMainDatabaseType(originalMainDBType)
 	})
 
 	priorityHigh := int64(10)
@@ -35,7 +35,7 @@ func TestGetChannelWithExclusionsReturnsNilWhenPriorityFullyExcluded(t *testing.
 		require.NoError(t, DB.Create(ability).Error)
 	}
 
-	channel, err := GetChannelWithExclusions("default", "gpt-test", 0, map[int]struct{}{1: {}})
+	channel, err := GetChannelWithExclusions("default", "gpt-test", 0, "", map[int]struct{}{1: {}})
 	require.NoError(t, err)
 	require.Nil(t, channel)
 }

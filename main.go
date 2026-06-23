@@ -122,6 +122,9 @@ func main() {
 	// Cost-first channel auto-priority scan task
 	service.StartChannelAutoPriorityScanTask()
 
+	// Persistent system maintenance task runner
+	service.StartSystemTaskRunner()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)
