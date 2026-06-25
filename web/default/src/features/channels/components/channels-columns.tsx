@@ -134,13 +134,13 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
     <TooltipProvider delay={100}>
       <Tooltip>
         <TooltipTrigger render={<div />}>
-          <div className='flex max-w-[220px] flex-col gap-1'>
+          <div className='flex min-w-0 flex-col gap-1'>
             <div className='flex items-center gap-1.5'>
               {profile.upstream_account ? (
                 <TruncatedText
                   text={profile.upstream_account}
                   className='text-xs font-medium'
-                  maxWidth='max-w-[120px]'
+                  maxWidth='max-w-[240px]'
                 />
               ) : (
                 <span className='text-muted-foreground text-xs'>
@@ -156,7 +156,7 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
                 />
               )}
             </div>
-            <div className='flex items-center gap-1'>
+            <div className='flex flex-wrap items-center gap-1'>
               {profile.upstream_group && (
                 <StatusBadge
                   label={profile.upstream_group}
@@ -1100,7 +1100,9 @@ export function useChannelsColumns(params?: {
         }
         return <UpstreamProfileCell channel={row.original as Channel} />
       },
-      size: 220,
+      size: 520,
+      minSize: 320,
+      maxSize: 960,
       enableSorting: false,
     },
 

@@ -20,6 +20,7 @@ import * as React from 'react'
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type ColumnSizingState,
   type ExpandedState,
   type OnChangeFn,
   type PaginationState,
@@ -58,6 +59,10 @@ type DataTableStateOptions = {
   columnVisibilityStorageKey?: string | false
   columnVisibility?: VisibilityState
   onColumnVisibilityChange?: OnChangeFn<VisibilityState>
+  initialColumnSizing?: ColumnSizingState
+  columnSizingStorageKey?: string | false
+  columnSizing?: ColumnSizingState
+  onColumnSizingChange?: OnChangeFn<ColumnSizingState>
   initialRowSelection?: RowSelectionState
   rowSelection?: RowSelectionState
   onRowSelectionChange?: OnChangeFn<RowSelectionState>
@@ -149,6 +154,32 @@ function readColumnVisibility(storageKey: string | undefined): VisibilityState {
   }
 }
 
+function readColumnSizing(storageKey: string | undefined): ColumnSizingState {
+  if (!storageKey || typeof window === 'undefined') return {}
+
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return {}
+
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+
+    return Object.entries(parsed).reduce<ColumnSizingState>(
+      (sizing, [key, value]) => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          sizing[key] = value
+        }
+        return sizing
+      },
+      {}
+    )
+  } catch {
+    return {}
+  }
+}
+
 export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
   const {
     data,
@@ -161,6 +192,7 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
     manualSorting,
     initialSorting = [],
     initialColumnVisibility = {},
+    initialColumnSizing = {},
     initialRowSelection = {},
     initialExpanded = {},
     initialPagination = { pageIndex: 0, pageSize: 20 },
@@ -182,6 +214,17 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
     }),
     [columnVisibilityStorageKey, initialColumnVisibility]
   )
+  const columnSizingStorageKey =
+    typeof options.columnSizingStorageKey === 'string'
+      ? options.columnSizingStorageKey
+      : undefined
+  const resolvedInitialColumnSizing = React.useMemo(
+    () => ({
+      ...initialColumnSizing,
+      ...readColumnSizing(columnSizingStorageKey),
+    }),
+    [columnSizingStorageKey, initialColumnSizing]
+  )
 
   const [sorting, onSortingChange] = useControllableTableState(
     options.sorting,
@@ -194,10 +237,19 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
       resolvedInitialColumnVisibility,
       options.onColumnVisibilityChange
     )
+  const [columnSizing, onColumnSizingChange] = useControllableTableState(
+    options.columnSizing,
+    resolvedInitialColumnSizing,
+    options.onColumnSizingChange
+  )
   const hydratedColumnVisibilityStorageKeyRef = React.useRef(
     columnVisibilityStorageKey
   )
   const skipNextColumnVisibilityPersistRef = React.useRef(false)
+  const hydratedColumnSizingStorageKeyRef = React.useRef(
+    columnSizingStorageKey
+  )
+  const skipNextColumnSizingPersistRef = React.useRef(false)
   const [rowSelection, onRowSelectionChange] = useControllableTableState(
     options.rowSelection,
     initialRowSelection,
@@ -228,6 +280,7 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
     state: {
       sorting,
       columnVisibility,
+      columnSizing,
       rowSelection,
       expanded,
       columnFilters: options.columnFilters,
@@ -244,6 +297,7 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
     manualSorting,
     onSortingChange,
     onColumnVisibilityChange,
+    onColumnSizingChange,
     onRowSelectionChange,
     onExpandedChange,
     onColumnFiltersChange: options.onColumnFiltersChange,
@@ -307,6 +361,42 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
       // Storage can be unavailable in private mode; table controls still work.
     }
   }, [columnVisibility, columnVisibilityStorageKey])
+
+  React.useEffect(() => {
+    if (
+      options.columnSizing !== undefined ||
+      columnSizingStorageKey === hydratedColumnSizingStorageKeyRef.current
+    ) {
+      return
+    }
+
+    hydratedColumnSizingStorageKeyRef.current = columnSizingStorageKey
+    skipNextColumnSizingPersistRef.current = true
+    onColumnSizingChange(() => resolvedInitialColumnSizing)
+  }, [
+    columnSizingStorageKey,
+    onColumnSizingChange,
+    options.columnSizing,
+    resolvedInitialColumnSizing,
+  ])
+
+  React.useEffect(() => {
+    if (!columnSizingStorageKey || typeof window === 'undefined') return
+
+    if (skipNextColumnSizingPersistRef.current) {
+      skipNextColumnSizingPersistRef.current = false
+      return
+    }
+
+    try {
+      window.localStorage.setItem(
+        columnSizingStorageKey,
+        JSON.stringify(columnSizing)
+      )
+    } catch {
+      // Storage can be unavailable in private mode; table controls still work.
+    }
+  }, [columnSizing, columnSizingStorageKey])
 
   return {
     table,

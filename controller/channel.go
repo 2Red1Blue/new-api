@@ -1239,7 +1239,9 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	if channel.UpstreamProfile != nil {
-		if _, err := model.UpdateChannelUpstreamProfile(channel.Id, *channel.UpstreamProfile, upstreamPasswordEnc); err != nil {
+		profile, profileErr := model.UpdateChannelUpstreamProfile(channel.Id, *channel.UpstreamProfile, upstreamPasswordEnc)
+		if profileErr != nil {
+			err = profileErr
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				fullChannel, getErr := model.GetChannelById(channel.Id, true)
 				if getErr == nil && strings.TrimSpace(fullChannel.Key) != "" {
@@ -1249,6 +1251,10 @@ func UpdateChannel(c *gin.Context) {
 				}
 			} else {
 				common.SysLog(fmt.Sprintf("failed to update upstream profile for channel #%d: %s", channel.Id, err.Error()))
+			}
+		} else if profile != nil {
+			if err := service.DisableChannelWhenUpstreamGroupMissing(profile, "upstream profile save"); err != nil {
+				common.SysLog(fmt.Sprintf("failed to apply upstream group missing rule for channel #%d: %s", channel.Id, err.Error()))
 			}
 		}
 	}

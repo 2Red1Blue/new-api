@@ -22,6 +22,23 @@ type RetryParam struct {
 	resetNextTry bool
 }
 
+type ChannelSelectionInfo struct {
+	TokenGroup     string `json:"token_group,omitempty"`
+	SelectedGroup  string `json:"selected_group,omitempty"`
+	ModelName      string `json:"model_name,omitempty"`
+	RequestPath    string `json:"request_path,omitempty"`
+	Retry          int    `json:"retry"`
+	PriorityRetry  int    `json:"priority_retry"`
+	AutoGroupIndex int    `json:"auto_group_index,omitempty"`
+	SelectedID     int    `json:"selected_id,omitempty"`
+	SelectedName   string `json:"selected_name,omitempty"`
+	SelectedStatus int    `json:"selected_status,omitempty"`
+	SelectedPrio   int64  `json:"selected_priority,omitempty"`
+	SelectedWeight int    `json:"selected_weight,omitempty"`
+	Error          string `json:"error,omitempty"`
+	Snapshot       any    `json:"snapshot,omitempty"`
+}
+
 func (p *RetryParam) GetRetry() int {
 	if p.Retry == nil {
 		return 0
@@ -53,6 +70,46 @@ func (p *RetryParam) ExcludedChannelIDs() map[int]struct{} {
 		return nil
 	}
 	return p.Excluded
+}
+
+func setChannelSelectionInfo(c *gin.Context, info ChannelSelectionInfo) {
+	if c == nil {
+		return
+	}
+	c.Set("channel_selection_info", info)
+}
+
+func AppendChannelSelectionAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
+	if c == nil || adminInfo == nil {
+		return
+	}
+	if anyInfo, ok := c.Get("channel_selection_info"); ok {
+		adminInfo["channel_selection"] = anyInfo
+	}
+}
+
+func channelSelectionInfoFromParam(param *RetryParam, selectedGroup string, priorityRetry int, groupIndex int, channel *model.Channel, err error) ChannelSelectionInfo {
+	info := ChannelSelectionInfo{
+		TokenGroup:     param.TokenGroup,
+		SelectedGroup:  selectedGroup,
+		ModelName:      param.ModelName,
+		RequestPath:    param.RequestPath,
+		Retry:          param.GetRetry(),
+		PriorityRetry:  priorityRetry,
+		AutoGroupIndex: groupIndex,
+		Snapshot:       model.GetChannelSelectionSnapshot(selectedGroup, param.ModelName, priorityRetry, param.RequestPath, param.ExcludedChannelIDs()),
+	}
+	if channel != nil {
+		info.SelectedID = channel.Id
+		info.SelectedName = channel.Name
+		info.SelectedStatus = channel.Status
+		info.SelectedPrio = channel.GetPriority()
+		info.SelectedWeight = channel.GetWeight()
+	}
+	if err != nil {
+		info.Error = err.Error()
+	}
+	return info
 }
 
 func GetFirstAvailableChannelAcrossPriorities(group, modelName string, excludedChannelIDs map[int]struct{}) (*model.Channel, error) {
@@ -144,7 +201,8 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ExcludedChannelIDs())
+			channel, err = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ExcludedChannelIDs())
+			setChannelSelectionInfo(param.Ctx, channelSelectionInfoFromParam(param, autoGroup, priorityRetry, i, channel, err))
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -183,6 +241,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		}
 	} else {
 		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, param.ExcludedChannelIDs())
+		setChannelSelectionInfo(param.Ctx, channelSelectionInfoFromParam(param, param.TokenGroup, param.GetRetry(), 0, channel, err))
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

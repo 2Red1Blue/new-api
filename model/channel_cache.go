@@ -23,6 +23,27 @@ var channelsIDM map[int]*Channel                     // all channels include dis
 var channel2advancedCustomConfig map[int]*dto.AdvancedCustomConfig
 var channelSyncLock sync.RWMutex
 
+type ChannelSelectionCandidate struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Priority int64  `json:"priority"`
+	Weight   int    `json:"weight"`
+	Excluded bool   `json:"excluded,omitempty"`
+}
+
+type ChannelSelectionSnapshot struct {
+	Group              string                      `json:"group"`
+	Model              string                      `json:"model"`
+	Retry              int                         `json:"retry"`
+	RequestPath        string                      `json:"request_path,omitempty"`
+	MatchedModel       string                      `json:"matched_model,omitempty"`
+	TargetPriority     int64                       `json:"target_priority,omitempty"`
+	Priorities         []int                       `json:"priorities,omitempty"`
+	TotalMatched       int                         `json:"total_matched"`
+	Candidates         []ChannelSelectionCandidate `json:"candidates,omitempty"`
+	ExcludedCandidates []ChannelSelectionCandidate `json:"excluded_candidates,omitempty"`
+}
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
@@ -210,6 +231,74 @@ func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry i
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+func GetChannelSelectionSnapshot(group string, model string, retry int, requestPath string, excludedChannelIDs map[int]struct{}) ChannelSelectionSnapshot {
+	snapshot := ChannelSelectionSnapshot{
+		Group:       group,
+		Model:       model,
+		Retry:       retry,
+		RequestPath: requestPath,
+	}
+	if !common.MemoryCacheEnabled {
+		return snapshot
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	matchedModel := model
+	channels := filterChannelsByRequestPath(group2model2channels[group][model], requestPath)
+	if len(channels) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(model)
+		channels = filterChannelsByRequestPath(group2model2channels[group][normalizedModel], requestPath)
+		if len(channels) > 0 {
+			matchedModel = normalizedModel
+		}
+	}
+	snapshot.MatchedModel = matchedModel
+	snapshot.TotalMatched = len(channels)
+	if len(channels) == 0 {
+		return snapshot
+	}
+
+	uniquePriorities := make(map[int]bool)
+	for _, channelId := range channels {
+		if channel, ok := channelsIDM[channelId]; ok {
+			uniquePriorities[int(channel.GetPriority())] = true
+		}
+	}
+	for priority := range uniquePriorities {
+		snapshot.Priorities = append(snapshot.Priorities, priority)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(snapshot.Priorities)))
+	if retry >= len(snapshot.Priorities) {
+		retry = len(snapshot.Priorities) - 1
+	}
+	if retry < 0 || retry >= len(snapshot.Priorities) {
+		return snapshot
+	}
+	snapshot.TargetPriority = int64(snapshot.Priorities[retry])
+
+	for _, channelId := range channels {
+		channel, ok := channelsIDM[channelId]
+		if !ok || channel.GetPriority() != snapshot.TargetPriority {
+			continue
+		}
+		candidate := ChannelSelectionCandidate{
+			ID:       channel.Id,
+			Name:     channel.Name,
+			Priority: channel.GetPriority(),
+			Weight:   channel.GetWeight(),
+		}
+		if _, excluded := excludedChannelIDs[channelId]; excluded {
+			candidate.Excluded = true
+			snapshot.ExcludedCandidates = append(snapshot.ExcludedCandidates, candidate)
+			continue
+		}
+		snapshot.Candidates = append(snapshot.Candidates, candidate)
+	}
+	return snapshot
 }
 
 // GetChannelPriorityLevelCount 返回指定分组和模型的优先级层数，供亲和性迁移遍历使用

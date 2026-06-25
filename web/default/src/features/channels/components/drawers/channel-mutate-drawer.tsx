@@ -2843,7 +2843,9 @@ export function ChannelMutateDrawer({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Optional JSON snapshot of upstream group ratios.')}
+                        {t(
+                          'Optional JSON snapshot of upstream group ratios. If the current upstream group is missing from the snapshot, the channel will be auto-disabled on save or sync.'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

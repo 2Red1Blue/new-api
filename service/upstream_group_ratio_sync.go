@@ -10,8 +10,36 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/types"
 	"gorm.io/gorm"
 )
+
+func DisableChannelWhenUpstreamGroupMissing(profile *model.ChannelUpstreamProfile, reasonPrefix string) error {
+	if profile == nil {
+		return nil
+	}
+	if profile.UpstreamGroup == "" {
+		return nil
+	}
+	if strings.TrimSpace(profile.UpstreamGroupRatios) == "" {
+		return nil
+	}
+	if !model.IsUpstreamGroupMissing(profile.UpstreamGroupRatios, profile.UpstreamGroup) {
+		return nil
+	}
+	channel, err := model.GetChannelById(profile.ChannelId, true)
+	if err != nil {
+		return err
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return nil
+	}
+	reason := fmt.Sprintf("%s: upstream group %q not found in fetched ratios", reasonPrefix, profile.UpstreamGroup)
+	common.SysLog(fmt.Sprintf("disabling channel #%d because upstream group %q is missing from ratios", channel.Id, profile.UpstreamGroup))
+	serviceErr := types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan())
+	DisableChannel(*serviceErr, reason)
+	return nil
+}
 
 // syncChannelUpstreamGroupRatio 拉取单个 profile 的上游分组倍率并更新数据库
 func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUpstreamProfile) error {
@@ -57,6 +85,11 @@ func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUp
 	if err := model.DB.Model(&model.ChannelUpstreamProfile{}).
 		Where("id = ?", profile.Id).
 		Updates(updates).Error; err != nil {
+		return err
+	}
+	profile.UpstreamGroupRatios = fetched.Raw
+
+	if err := DisableChannelWhenUpstreamGroupMissing(profile, "upstream ratio sync"); err != nil {
 		return err
 	}
 

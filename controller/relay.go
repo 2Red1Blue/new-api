@@ -500,7 +500,7 @@ func recordFinalChannelAffinityFailure(c *gin.Context, openaiErr *types.NewAPIEr
 	if code == http.StatusTooManyRequests {
 		if service.ShouldBreakChannelAffinityOnRateLimit(c) {
 			logger.LogInfo(c, "channel affinity failure: rate limit, triggering HandleChannelAffinityFailure")
-			service.HandleChannelAffinityFailure(c, channelAffinityFailureExclusions(c, retryParam))
+			service.HandleChannelAffinityFailure(c, channelAffinityFailureExclusions(c, retryParam), buildChannelAffinityFailureRecord(c, openaiErr, "rate_limit"))
 		} else {
 			logger.LogInfo(c, "channel affinity failure skip: rate limit but BreakAffinityOnRateLimit=false")
 		}
@@ -516,7 +516,27 @@ func recordFinalChannelAffinityFailure(c *gin.Context, openaiErr *types.NewAPIEr
 		return
 	}
 	logger.LogInfo(c, fmt.Sprintf("channel affinity failure: status=%d unavailable, triggering HandleChannelAffinityFailure", code))
-	service.HandleChannelAffinityFailure(c, channelAffinityFailureExclusions(c, retryParam))
+	reason := "unavailable_status"
+	if c.GetBool(upstreamInsufficientBalanceContextKey) {
+		reason = "upstream_insufficient_balance"
+	}
+	service.HandleChannelAffinityFailure(c, channelAffinityFailureExclusions(c, retryParam), buildChannelAffinityFailureRecord(c, openaiErr, reason))
+}
+
+func buildChannelAffinityFailureRecord(c *gin.Context, openaiErr *types.NewAPIError, reason string) service.ChannelAffinityFailureRecord {
+	record := service.ChannelAffinityFailureRecord{
+		Reason:               reason,
+		FailedChannelID:      c.GetInt("channel_id"),
+		UpstreamInsufficient: c.GetBool(upstreamInsufficientBalanceContextKey),
+	}
+	if openaiErr == nil {
+		return record
+	}
+	record.StatusCode = openaiErr.StatusCode
+	record.ErrorCode = openaiErr.GetErrorCode()
+	record.ErrorType = openaiErr.GetErrorType()
+	record.MessagePreview = common.LocalLogPreview(openaiErr.MaskSensitiveErrorWithStatusCode())
+	return record
 }
 
 func channelAffinityFailureExclusions(c *gin.Context, retryParam *service.RetryParam) map[int]struct{} {
@@ -540,16 +560,22 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		usingGroup := c.GetString("group")
 		gopool.Go(func() {
 			service.NotifyChannelInsufficientBalance(service.UpstreamInsufficientNotificationContext{
-				ChannelError: channelError,
-				ErrorMessage: errorMessage,
-				ModelName:    modelName,
-				UsingGroup:   usingGroup,
+				ChannelError:   channelError,
+				ErrorMessage:   errorMessage,
+				ModelName:      modelName,
+				UsingGroup:     usingGroup,
+				MatchedKeyword: matchedKeyword,
 			})
 		})
 	}
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if (service.ShouldDisableChannel(err) || isInsufficientBalance) && channelError.AutoBan {
+	shouldDisableChannel := service.ShouldDisableChannel(err)
+	if shouldDisableChannel || isInsufficientBalance {
+		logger.LogWarn(c, fmt.Sprintf("channel #%d auto-disable decision: should_disable=%t upstream_insufficient=%t matched_keyword=%q auto_ban=%t",
+			channelError.ChannelId, shouldDisableChannel, isInsufficientBalance, matchedKeyword, channelError.AutoBan))
+	}
+	if (shouldDisableChannel || isInsufficientBalance) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, errorMessage)
 		})
@@ -581,6 +607,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		service.AppendChannelSelectionAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {

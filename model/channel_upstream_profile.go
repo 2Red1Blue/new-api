@@ -191,6 +191,44 @@ func normalizeAutoPriorityMax(minValue int64, maxValue int64) int64 {
 	return maxValue
 }
 
+func ParseUpstreamGroupRatios(raw string) map[string]float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	ratios := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(raw, &ratios); err != nil {
+		return nil
+	}
+	return ratios
+}
+
+func HasUpstreamGroupRatio(raw string, group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return true
+	}
+	ratios := ParseUpstreamGroupRatios(raw)
+	if len(ratios) == 0 {
+		return false
+	}
+	_, ok := ratios[group]
+	return ok
+}
+
+func IsUpstreamGroupMissing(raw string, group string) bool {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return false
+	}
+	ratios := ParseUpstreamGroupRatios(raw)
+	if len(ratios) == 0 {
+		return true
+	}
+	_, ok := ratios[group]
+	return !ok
+}
+
 func clampInt64(value int64, minValue int64, maxValue int64) int64 {
 	if value < minValue {
 		return minValue

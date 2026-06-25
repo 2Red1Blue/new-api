@@ -258,11 +258,13 @@ func NotifyChannelInsufficientBalance(ctx UpstreamInsufficientNotificationContex
 		}
 		return
 	}
-	matched, ok := matchInsufficientBalanceKeyword(ctx.ErrorMessage, profile)
-	if !ok {
-		return
+	if ctx.MatchedKeyword == "" {
+		matched, ok := matchInsufficientBalanceKeyword(ctx.ErrorMessage, profile)
+		if !ok {
+			return
+		}
+		ctx.MatchedKeyword = matched
 	}
-	ctx.MatchedKeyword = matched
 	now := common.GetTimestamp()
 	shouldNotify := shouldNotifyProfile(profile, now)
 	if err := updateInsufficientState(profile, ctx.ErrorMessage, shouldNotify, now); err != nil {

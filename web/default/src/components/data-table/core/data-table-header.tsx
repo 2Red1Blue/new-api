@@ -22,12 +22,14 @@ import {
   type Table as TanstackTable,
 } from '@tanstack/react-table'
 import { TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import { DataTableColumnHeader } from './column-header'
 import type { DataTableColumnClassName } from './types'
 
 type DataTableHeaderProps<TData> = {
   table: TanstackTable<TData>
   applyHeaderSize?: boolean
+  enableColumnResizing?: boolean
   className?: string
   rowClassName?: string
   getColumnClassName?: DataTableColumnClassName
@@ -36,6 +38,7 @@ type DataTableHeaderProps<TData> = {
 export function DataTableHeader<TData>({
   table,
   applyHeaderSize,
+  enableColumnResizing,
   className,
   rowClassName,
   getColumnClassName,
@@ -48,10 +51,26 @@ export function DataTableHeader<TData>({
             <TableHead
               key={header.id}
               colSpan={header.colSpan}
-              className={getColumnClassName?.(header.column.id, 'header')}
+              className={cn(
+                'relative',
+                getColumnClassName?.(header.column.id, 'header')
+              )}
               style={applyHeaderSize ? { width: header.getSize() } : undefined}
             >
               {renderHeaderContent(header)}
+              {enableColumnResizing && header.column.getCanResize() && (
+                <div
+                  onDoubleClick={() => header.column.resetSize()}
+                  onMouseDown={header.getResizeHandler()}
+                  onTouchStart={header.getResizeHandler()}
+                  className={cn(
+                    'absolute top-0 right-0 h-full w-2 cursor-col-resize touch-none select-none',
+                    'bg-border/60 opacity-0 transition-opacity hover:opacity-100',
+                    header.column.getIsResizing() && 'opacity-100'
+                  )}
+                  aria-hidden='true'
+                />
+              )}
             </TableHead>
           ))}
         </TableRow>

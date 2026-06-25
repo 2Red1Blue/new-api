@@ -61,6 +61,7 @@ import { DataTableBulkActions } from './data-table-bulk-actions'
 const route = getRouteApi('/_authenticated/channels/')
 const CHANNELS_COLUMN_VISIBILITY_STORAGE_KEY =
   'channels:column-visibility'
+const CHANNELS_COLUMN_SIZING_STORAGE_KEY = 'channels:column-sizing'
 const CHANNELS_VIEW_MODE_STORAGE_KEY = 'channels:view-mode'
 
 const CHANNEL_SORTABLE_COLUMNS = new Set<ChannelSortBy>([
@@ -281,6 +282,7 @@ export function ChannelsTable() {
       tag: false,
     },
     columnVisibilityStorageKey: CHANNELS_COLUMN_VISIBILITY_STORAGE_KEY,
+    columnSizingStorageKey: CHANNELS_COLUMN_SIZING_STORAGE_KEY,
     columnFilters,
     pagination,
     globalFilter,
@@ -373,6 +375,7 @@ export function ChannelsTable() {
       renderCard={(row) => <ChannelCard row={row} />}
       cardGridClassName='grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3'
       applyHeaderSize
+      enableColumnResizing
       toolbarProps={{
         searchPlaceholder: t('Filter by name, ID, or key...'),
         searchDebounceMs: 500,
