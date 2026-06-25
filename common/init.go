@@ -84,9 +84,7 @@ func InitEnv() {
 	LogCallerEnabled = GetEnvOrDefaultBool("LOG_CALLER_ENABLED", false)
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
-	// NodeName 优先用 NODE_NAME，未配置时回退主机名（容器下=容器 ID/Pod 名，自动扩容天然唯一）。
-	hostname, _ := os.Hostname()
-	NodeName = GetEnvOrDefaultString("NODE_NAME", hostname)
+	initNodeNameIdentity()
 	TLSInsecureSkipVerify = GetEnvOrDefaultBool("TLS_INSECURE_SKIP_VERIFY", false)
 	if TLSInsecureSkipVerify {
 		if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
@@ -97,6 +95,8 @@ func InitEnv() {
 			}
 		}
 	}
+	SMTPStartTLSEnabled = GetEnvOrDefaultBool("SMTP_STARTTLS_ENABLE", GetEnvOrDefaultBool("SMTP_STARTTLS_ENABLED", false))
+	SMTPInsecureSkipVerify = GetEnvOrDefaultBool("SMTP_INSECURE_SKIP_VERIFY", GetEnvOrDefaultBool("SMTP_TLS_INSECURE_SKIP_VERIFY", false))
 
 	// Parse requestInterval and set RequestInterval
 	requestInterval, _ = strconv.Atoi(os.Getenv("POLLING_INTERVAL"))
