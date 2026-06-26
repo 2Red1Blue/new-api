@@ -41,9 +41,8 @@ const (
 	channelAffinityUsageCacheStatsNamespace      = "new-api:channel_affinity_usage_cache_stats:v1"
 
 	// 连续失败 N 个请求后触发渠道迁移
-	channelAffinityFailThreshold             = 4
-	channelAffinityFailureFlightRecorderSize = channelAffinityFailThreshold
-	channelAffinityFailureRecorderTTL        = 24 * time.Hour
+	channelAffinityFailThreshold      = 4
+	channelAffinityFailureRecorderTTL = 24 * time.Hour
 	// 同一当前绑定找不到替代渠道后的冷却时间，避免频繁查找
 	channelAffinityCooldownDuration = 2 * time.Minute
 )
@@ -101,7 +100,7 @@ type ChannelAffinityState struct {
 	LastRequestID string `json:"last_request_id,omitempty"`
 }
 
-// ChannelAffinityFailureRecorder keeps recent failure records longer than the
+// ChannelAffinityFailureRecorder keeps recent distinct failure records longer than the
 // routing state TTL so operators can inspect migrations after the binding expires.
 type ChannelAffinityFailureRecorder struct {
 	Records              []ChannelAffinityFailureRecord `json:"records,omitempty"`
@@ -1004,15 +1003,38 @@ func getFirstAvailableChannelFromGroups(groups []string, modelName string, exclu
 	return nil, ""
 }
 
+func channelAffinityFailureRecordSignature(record ChannelAffinityFailureRecord) string {
+	return fmt.Sprintf("%d|%s|%d|%s|%s",
+		record.FailedChannelID,
+		strings.TrimSpace(record.Reason),
+		record.StatusCode,
+		record.ErrorCode,
+		record.ErrorType,
+	)
+}
+
+func upsertChannelAffinityFailureRecord(records []ChannelAffinityFailureRecord, record ChannelAffinityFailureRecord) []ChannelAffinityFailureRecord {
+	if len(records) == 0 {
+		return []ChannelAffinityFailureRecord{record}
+	}
+
+	signature := channelAffinityFailureRecordSignature(record)
+	filtered := make([]ChannelAffinityFailureRecord, 0, len(records)+1)
+	for _, existing := range records {
+		if channelAffinityFailureRecordSignature(existing) == signature {
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+	filtered = append(filtered, record)
+	return filtered
+}
+
 func appendChannelAffinityFailureRecord(state *ChannelAffinityState, record ChannelAffinityFailureRecord) {
 	if state == nil {
 		return
 	}
-	records := append(state.FailureRecords, record)
-	if len(records) > channelAffinityFailureFlightRecorderSize {
-		records = records[len(records)-channelAffinityFailureFlightRecorderSize:]
-	}
-	state.FailureRecords = records
+	state.FailureRecords = upsertChannelAffinityFailureRecord(state.FailureRecords, record)
 }
 
 func appendChannelAffinityFailureRecorder(cacheKey string, record ChannelAffinityFailureRecord) []ChannelAffinityFailureRecord {
@@ -1024,16 +1046,12 @@ func appendChannelAffinityFailureRecorder(cacheKey string, record ChannelAffinit
 	if err != nil {
 		common.SysError(fmt.Sprintf("channel affinity failure recorder cache get failed: key=%s, err=%v", cacheKey, err))
 	}
-	records := append(recorder.Records, record)
-	if len(records) > channelAffinityFailureFlightRecorderSize {
-		records = records[len(records)-channelAffinityFailureFlightRecorderSize:]
-	}
-	recorder.Records = records
+	recorder.Records = upsertChannelAffinityFailureRecord(recorder.Records, record)
 	recorder.UpdatedAtUnixSeconds = time.Now().Unix()
 	if err := cache.SetWithTTL(cacheKey, recorder, channelAffinityFailureRecorderTTL); err != nil {
 		common.SysError(fmt.Sprintf("channel affinity failure recorder cache set failed: key=%s, err=%v", cacheKey, err))
 	}
-	return records
+	return recorder.Records
 }
 
 func channelAffinitySortedIDs(ids map[int]struct{}) []int {
