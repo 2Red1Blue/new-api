@@ -60,6 +60,7 @@ import {
   getBalanceVariant,
   getChannelTypeIcon,
   getChannelTypeLabel,
+  getUpstreamEffectiveRatio,
   getResponseTimeConfig,
   isMultiKeyChannel,
   parseModelsList,
@@ -123,12 +124,7 @@ function UpstreamProfileCell({ channel }: { channel: Channel }) {
   }
 
   const hasInsufficientState = profile.last_insufficient_at > 0
-  const effectiveRatio =
-    profile.upstream_effective_ratio > 0
-      ? profile.upstream_effective_ratio
-      : profile.upstream_group_ratio > 0 && profile.upstream_topup_ratio > 0
-        ? profile.upstream_group_ratio / profile.upstream_topup_ratio
-        : 0
+  const effectiveRatio = getUpstreamEffectiveRatio(profile)
 
   return (
     <TooltipProvider delay={100}>

@@ -50,6 +50,8 @@ type upstreamGroupRatioSyncFailureData struct {
 	ProfileID     int64  `json:"profile_id"`
 	UpstreamGroup string `json:"upstream_group"`
 	UpstreamURL   string `json:"upstream_url"`
+	GroupRatio    float64 `json:"group_ratio,omitempty"`
+	Source        string  `json:"source,omitempty"`
 	Error         string `json:"error"`
 }
 
@@ -394,13 +396,38 @@ func RecordUpstreamGroupRatioSyncFailure(channelID int, profileID int64, upstrea
 	if syncErr == nil {
 		return nil
 	}
+	return RecordUpstreamGroupRatioSyncResult(
+		channelID,
+		profileID,
+		upstreamGroup,
+		baseURL,
+		0,
+		"",
+		TaskStatusFailure,
+		syncErr.Error(),
+	)
+}
 
+func RecordUpstreamGroupRatioSyncSuccess(channelID int, profileID int64, upstreamGroup string, baseURL string, groupRatio float64, source string) error {
+	return RecordUpstreamGroupRatioSyncResult(
+		channelID,
+		profileID,
+		upstreamGroup,
+		baseURL,
+		groupRatio,
+		source,
+		TaskStatusSuccess,
+		"",
+	)
+}
+
+func RecordUpstreamGroupRatioSyncResult(channelID int, profileID int64, upstreamGroup string, baseURL string, groupRatio float64, source string, status TaskStatus, errorText string) error {
 	now := common.GetTimestamp()
-	errorText := syncErr.Error()
 	upstreamGroup = strings.TrimSpace(upstreamGroup)
 	baseURL = sanitizeTaskURL(baseURL)
+	source = sanitizeTaskURL(source)
 
-	task := findRecentUpstreamGroupRatioSyncFailureTask(channelID, profileID)
+	task := findRecentUpstreamGroupRatioSyncTask(channelID, profileID)
 	if task == nil {
 		task = &Task{
 			CreatedAt: now,
@@ -408,12 +435,13 @@ func RecordUpstreamGroupRatioSyncFailure(channelID int, profileID int64, upstrea
 			Platform:  constant.TaskPlatformSystem,
 			ChannelId: channelID,
 			Action:    constant.TaskActionUpstreamGroupRatioSync,
-			Status:    TaskStatusFailure,
+			Status:    status,
 		}
 	}
 
 	task.UpdatedAt = now
 	task.Group = upstreamGroup
+	task.Status = status
 	task.FailReason = errorText
 	task.SubmitTime = now
 	task.StartTime = now
@@ -427,6 +455,8 @@ func RecordUpstreamGroupRatioSyncFailure(channelID int, profileID int64, upstrea
 		ProfileID:     profileID,
 		UpstreamGroup: upstreamGroup,
 		UpstreamURL:   baseURL,
+		GroupRatio:    groupRatio,
+		Source:        source,
 		Error:         errorText,
 	})
 
@@ -436,7 +466,7 @@ func RecordUpstreamGroupRatioSyncFailure(channelID int, profileID int64, upstrea
 	return task.Insert()
 }
 
-func findRecentUpstreamGroupRatioSyncFailureTask(channelID int, profileID int64) *Task {
+func findRecentUpstreamGroupRatioSyncTask(channelID int, profileID int64) *Task {
 	if profileID <= 0 {
 		return nil
 	}
@@ -445,7 +475,6 @@ func findRecentUpstreamGroupRatioSyncFailureTask(channelID int, profileID int64)
 		Where("channel_id = ?", channelID).
 		Where("platform = ?", constant.TaskPlatformSystem).
 		Where("action = ?", constant.TaskActionUpstreamGroupRatioSync).
-		Where("status = ?", TaskStatusFailure).
 		Order("id DESC").
 		Limit(100).
 		Find(&tasks).Error; err != nil {

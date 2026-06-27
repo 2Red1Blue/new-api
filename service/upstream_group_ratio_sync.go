@@ -88,6 +88,18 @@ func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUp
 		return err
 	}
 	profile.UpstreamGroupRatios = fetched.Raw
+	profile.UpstreamGroupRatio = groupRatio
+
+	if err := model.RecordUpstreamGroupRatioSyncSuccess(
+		profile.ChannelId,
+		profile.Id,
+		profile.UpstreamGroup,
+		baseURL,
+		groupRatio,
+		fetched.Source,
+	); err != nil {
+		return err
+	}
 
 	if err := DisableChannelWhenUpstreamGroupMissing(profile, "upstream ratio sync"); err != nil {
 		return err

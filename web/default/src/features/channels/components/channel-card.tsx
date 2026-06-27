@@ -21,8 +21,13 @@ import { flexRender, type Row } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { GroupBadge } from '@/components/group-badge'
+import { StatusBadge } from '@/components/status-badge'
 import { CHANNEL_STATUS } from '../constants'
-import { isTagAggregateRow, parseGroupsList } from '../lib'
+import {
+  getUpstreamEffectiveRatio,
+  isTagAggregateRow,
+  parseGroupsList,
+} from '../lib'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
@@ -75,6 +80,9 @@ function ChannelCardComponent({
   const balanceCell = renderCell('balance')
   const responseCell = renderCell('response_time')
   const testCell = renderCell('test_time')
+  const effectiveRatio = isTagRow
+    ? 0
+    : getUpstreamEffectiveRatio(row.original.upstream_profile)
 
   const labelClass = 'text-muted-foreground text-[11px] font-medium select-none'
 
@@ -126,6 +134,23 @@ function ChannelCardComponent({
               {balanceCell ?? <span className='text-muted-foreground'>-</span>}
             </div>
           </div>
+          {!isTagRow && (
+            <div className='min-w-0'>
+              <div className={cn('mb-1', labelClass)}>
+                {t('Effective Upstream Ratio')}
+              </div>
+              {effectiveRatio > 0 ? (
+                <StatusBadge
+                  label={`${effectiveRatio.toFixed(4)}x`}
+                  variant='success'
+                  size='sm'
+                  copyable={false}
+                />
+              ) : (
+                <span className='text-muted-foreground text-sm'>-</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right column (sits on the right, content left-aligned). A single

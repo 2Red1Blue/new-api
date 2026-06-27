@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -26,7 +27,7 @@ func setupUpstreamGroupRatioSyncTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUpstreamProfile{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUpstreamProfile{}, &model.Task{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -273,4 +274,100 @@ func TestSyncChannelUpstreamGroupRatioKeepsExistingTopupRatio(t *testing.T) {
 	require.NoError(t, model.DB.First(&savedProfile, profile.Id).Error)
 	require.Equal(t, 0.5, savedProfile.UpstreamGroupRatio)
 	require.Equal(t, 2.0, savedProfile.UpstreamTopupRatio)
+}
+
+func TestSyncAllChannelUpstreamGroupRatiosStoresLatestTaskPerProfile(t *testing.T) {
+	setupUpstreamGroupRatioSyncTestDB(t)
+
+	origSecret := common.UpstreamSecretKey
+	common.UpstreamSecretKey = "test-upstream-secret"
+	t.Cleanup(func() {
+		common.UpstreamSecretKey = origSecret
+	})
+
+	successServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ratio_config":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group_ratio":{"vip":0.6}}}`))
+		case "/api/status":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"topup_ratio":2}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"success":false,"message":"not found"}`))
+		}
+	}))
+	defer successServer.Close()
+
+	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body>login</body></html>`))
+	}))
+	defer failServer.Close()
+
+	successChannel := &model.Channel{
+		Id:            601,
+		Name:          "sync-success",
+		Key:           "sk-success",
+		Status:        common.ChannelStatusEnabled,
+		OtherSettings: `{"upstream_rpm_limit":7}`,
+	}
+	require.NoError(t, model.DB.Create(successChannel).Error)
+	failChannel := &model.Channel{
+		Id:            602,
+		Name:          "sync-fail",
+		Key:           "sk-fail",
+		Status:        common.ChannelStatusEnabled,
+		OtherSettings: `{"upstream_rpm_limit":8}`,
+	}
+	require.NoError(t, model.DB.Create(failChannel).Error)
+
+	successProfile := &model.ChannelUpstreamProfile{
+		ChannelId:        successChannel.Id,
+		KeyFingerprint:   "success-profile",
+		KeyMasked:        "sk-s...cess",
+		UpstreamLoginUrl: successServer.URL,
+		UpstreamGroup:    "vip",
+		CreatedAt:        common.GetTimestamp(),
+		UpdatedAt:        common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(successProfile).Error)
+
+	failProfile := &model.ChannelUpstreamProfile{
+		ChannelId:        failChannel.Id,
+		KeyFingerprint:   "fail-profile",
+		KeyMasked:        "sk-f...ail",
+		UpstreamLoginUrl: failServer.URL,
+		UpstreamGroup:    "vip",
+		CreatedAt:        common.GetTimestamp(),
+		UpdatedAt:        common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(failProfile).Error)
+
+	synced, failed, err := SyncAllChannelUpstreamGroupRatios(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, synced)
+	assert.Equal(t, 1, failed)
+
+	var tasks []model.Task
+	require.NoError(t, model.DB.Order("channel_id asc").Find(&tasks).Error)
+	require.Len(t, tasks, 2)
+
+	assert.Equal(t, successChannel.Id, tasks[0].ChannelId)
+	assert.Equal(t, string(model.TaskStatusSuccess), string(tasks[0].Status))
+	assert.Empty(t, tasks[0].FailReason)
+	var successData map[string]any
+	require.NoError(t, tasks[0].GetData(&successData))
+	assert.Equal(t, successServer.URL, tasks[0].Properties.Input)
+	assert.Equal(t, "vip", successData["upstream_group"])
+	assert.Equal(t, 0.6, successData["group_ratio"])
+	assert.Equal(t, successServer.URL+"/api/ratio_config", successData["source"])
+
+	assert.Equal(t, failChannel.Id, tasks[1].ChannelId)
+	assert.Equal(t, string(model.TaskStatusFailure), string(tasks[1].Status))
+	assert.Contains(t, tasks[1].FailReason, "获取分组倍率失败")
+	var failData map[string]any
+	require.NoError(t, tasks[1].GetData(&failData))
+	assert.Equal(t, failServer.URL, tasks[1].Properties.Input)
+	assert.Equal(t, "vip", failData["upstream_group"])
+	assert.Contains(t, failData["error"], "invalid character '<'")
 }

@@ -121,6 +121,8 @@ func TestRecordUpstreamGroupRatioSyncFailureSanitizesURLAndUpdatesProfile(t *tes
 	assert.EqualValues(t, 12, data.ChannelID)
 	assert.EqualValues(t, 345, data.ProfileID)
 	assert.Equal(t, "https://example.com:8443/login", data.UpstreamURL)
+	assert.Zero(t, data.GroupRatio)
+	assert.Empty(t, data.Source)
 
 	require.NoError(t, RecordUpstreamGroupRatioSyncFailure(
 		12,
@@ -132,6 +134,42 @@ func TestRecordUpstreamGroupRatioSyncFailureSanitizesURLAndUpdatesProfile(t *tes
 	var count int64
 	require.NoError(t, DB.Model(&Task{}).Count(&count).Error)
 	assert.EqualValues(t, 2, count)
+}
+
+func TestRecordUpstreamGroupRatioSyncSuccessReusesExistingTask(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, RecordUpstreamGroupRatioSyncFailure(
+		12,
+		345,
+		"vip",
+		"https://user:pass@example.com:8443/login?token=secret#fragment",
+		errors.New("first failure"),
+	))
+	require.NoError(t, RecordUpstreamGroupRatioSyncSuccess(
+		12,
+		345,
+		"vip",
+		"https://user:pass@example.com:8443/login?token=secret#fragment",
+		0.75,
+		"https://user:pass@example.com:8443/api/pricing?token=secret",
+	))
+
+	var tasks []Task
+	require.NoError(t, DB.Order("id").Find(&tasks).Error)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, string(TaskStatusSuccess), string(tasks[0].Status))
+	assert.Empty(t, tasks[0].FailReason)
+	assert.Equal(t, "https://example.com:8443/login", tasks[0].Properties.Input)
+
+	var data upstreamGroupRatioSyncFailureData
+	require.NoError(t, tasks[0].GetData(&data))
+	assert.EqualValues(t, 12, data.ChannelID)
+	assert.EqualValues(t, 345, data.ProfileID)
+	assert.Equal(t, "https://example.com:8443/login", data.UpstreamURL)
+	assert.Equal(t, 0.75, data.GroupRatio)
+	assert.Equal(t, "https://example.com:8443/api/pricing", data.Source)
+	assert.Empty(t, data.Error)
 }
 
 // ---------------------------------------------------------------------------

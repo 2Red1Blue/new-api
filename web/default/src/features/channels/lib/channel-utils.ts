@@ -27,7 +27,12 @@ import {
   RESPONSE_TIME_THRESHOLDS,
   TYPE_TO_KEY_PROMPT,
 } from '../constants'
-import type { Channel, ChannelSettings, ChannelOtherSettings } from '../types'
+import type {
+  Channel,
+  ChannelOtherSettings,
+  ChannelSettings,
+  ChannelUpstreamProfile,
+} from '../types'
 
 // ============================================================================
 // Channel Type Utilities
@@ -351,6 +356,25 @@ export function getBalanceVariant(
     return 'warning'
   }
   return 'success'
+}
+
+/**
+ * Return the effective upstream ratio after normalizing the top-up ratio.
+ * Prefer the backend summary field and fall back to the raw ratio calculation.
+ */
+export function getUpstreamEffectiveRatio(
+  profile: ChannelUpstreamProfile | null | undefined
+): number {
+  if (!profile) {
+    return 0
+  }
+  if (profile.upstream_effective_ratio > 0) {
+    return profile.upstream_effective_ratio
+  }
+  if (profile.upstream_group_ratio > 0 && profile.upstream_topup_ratio > 0) {
+    return profile.upstream_group_ratio / profile.upstream_topup_ratio
+  }
+  return 0
 }
 
 // ============================================================================
