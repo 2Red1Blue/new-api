@@ -42,73 +42,73 @@ type ChannelUpstreamProfile struct {
 	CreatedAt                   int64   `json:"created_at" gorm:"bigint"`
 	UpdatedAt                   int64   `json:"updated_at" gorm:"bigint"`
 	// 上游会话凭据（refresh_token → access_token），用于避开 Turnstile 等浏览器验证
-	UpstreamAuthType            string `json:"upstream_auth_type" gorm:"type:varchar(32);default:''"`
-	UpstreamAccessTokenEnc      string `json:"-" gorm:"type:text"`
-	UpstreamRefreshTokenEnc     string `json:"-" gorm:"type:text"`
+	UpstreamAuthType             string `json:"upstream_auth_type" gorm:"type:varchar(32);default:''"`
+	UpstreamAccessTokenEnc       string `json:"-" gorm:"type:text"`
+	UpstreamRefreshTokenEnc      string `json:"-" gorm:"type:text"`
 	UpstreamAccessTokenExpiresAt int64  `json:"upstream_access_token_expires_at" gorm:"bigint;default:0"`
-	UpstreamAuthRefreshedAt     int64  `json:"upstream_auth_refreshed_at" gorm:"bigint;default:0"`
-	UpstreamAuthRefreshError    string `json:"upstream_auth_refresh_error" gorm:"type:varchar(512);default:''"`
+	UpstreamAuthRefreshedAt      int64  `json:"upstream_auth_refreshed_at" gorm:"bigint;default:0"`
+	UpstreamAuthRefreshError     string `json:"upstream_auth_refresh_error" gorm:"type:varchar(512);default:''"`
 
 	// 关联上游身份，跨 channel 共享登录凭据和会话 token
-	UpstreamIdentityId *int64             `json:"upstream_identity_id" gorm:"index"`
-	UpstreamIdentity   *UpstreamIdentity  `json:"-" gorm:"-"`
+	UpstreamIdentityId *int64            `json:"upstream_identity_id" gorm:"index"`
+	UpstreamIdentity   *UpstreamIdentity `json:"-" gorm:"-"`
 }
 
 type ChannelUpstreamProfileSummary struct {
-	Id                          int64   `json:"id"`
-	ChannelId                   int     `json:"channel_id"`
-	KeyFingerprint              string  `json:"key_fingerprint"`
-	KeyMasked                   string  `json:"key_masked"`
-	KeyLabel                    string  `json:"key_label"`
-	UpstreamAccount             string  `json:"upstream_account"`
-	UpstreamLoginUrl            string  `json:"upstream_login_url"`
-	UpstreamGroup               string  `json:"upstream_group"`
-	UpstreamGroupRatio          float64 `json:"upstream_group_ratio"`
-	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio"`
-	UpstreamEffectiveRatio      float64 `json:"upstream_effective_ratio"`
-	UpstreamGroupRatios         string  `json:"upstream_group_ratios"`
-	AutoPriorityEnabled         bool    `json:"auto_priority_enabled"`
-	AutoPriorityBase            int64   `json:"auto_priority_base"`
-	AutoPriorityMin             int64   `json:"auto_priority_min"`
-	AutoPriorityMax             int64   `json:"auto_priority_max"`
-	AutoPriorityValue           int64   `json:"auto_priority_value"`
-	AutoPriorityUpdatedAt       int64   `json:"auto_priority_updated_at"`
-	AutoPriorityReason          string  `json:"auto_priority_reason"`
-	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
-	NotifyEnabled               bool    `json:"notify_enabled"`
-	PasswordConfigured          bool    `json:"password_configured"`
-	LastInsufficientAt          int64   `json:"last_insufficient_at"`
-	LastInsufficientReason      string  `json:"last_insufficient_reason"`
-	LastNotifiedAt              int64   `json:"last_notified_at"`
-	NotifySuppressUntil         int64   `json:"notify_suppress_until"`
-	CreatedAt                   int64   `json:"created_at"`
-	UpdatedAt                   int64   `json:"updated_at"`
-	UpstreamAuthType            string  `json:"upstream_auth_type"`
-	UpstreamAccessTokenExpiresAt int64  `json:"upstream_access_token_expires_at"`
-	UpstreamAuthRefreshedAt     int64   `json:"upstream_auth_refreshed_at"`
-	UpstreamAuthRefreshError    string  `json:"upstream_auth_refresh_error"`
-	SessionConfigured           bool    `json:"session_configured"`
+	Id                           int64   `json:"id"`
+	ChannelId                    int     `json:"channel_id"`
+	KeyFingerprint               string  `json:"key_fingerprint"`
+	KeyMasked                    string  `json:"key_masked"`
+	KeyLabel                     string  `json:"key_label"`
+	UpstreamAccount              string  `json:"upstream_account"`
+	UpstreamLoginUrl             string  `json:"upstream_login_url"`
+	UpstreamGroup                string  `json:"upstream_group"`
+	UpstreamGroupRatio           float64 `json:"upstream_group_ratio"`
+	UpstreamTopupRatio           float64 `json:"upstream_topup_ratio"`
+	UpstreamEffectiveRatio       float64 `json:"upstream_effective_ratio"`
+	UpstreamGroupRatios          string  `json:"upstream_group_ratios"`
+	AutoPriorityEnabled          bool    `json:"auto_priority_enabled"`
+	AutoPriorityBase             int64   `json:"auto_priority_base"`
+	AutoPriorityMin              int64   `json:"auto_priority_min"`
+	AutoPriorityMax              int64   `json:"auto_priority_max"`
+	AutoPriorityValue            int64   `json:"auto_priority_value"`
+	AutoPriorityUpdatedAt        int64   `json:"auto_priority_updated_at"`
+	AutoPriorityReason           string  `json:"auto_priority_reason"`
+	InsufficientBalanceKeywords  string  `json:"insufficient_balance_keywords"`
+	NotifyEnabled                bool    `json:"notify_enabled"`
+	PasswordConfigured           bool    `json:"password_configured"`
+	LastInsufficientAt           int64   `json:"last_insufficient_at"`
+	LastInsufficientReason       string  `json:"last_insufficient_reason"`
+	LastNotifiedAt               int64   `json:"last_notified_at"`
+	NotifySuppressUntil          int64   `json:"notify_suppress_until"`
+	CreatedAt                    int64   `json:"created_at"`
+	UpdatedAt                    int64   `json:"updated_at"`
+	UpstreamAuthType             string  `json:"upstream_auth_type"`
+	UpstreamAccessTokenExpiresAt int64   `json:"upstream_access_token_expires_at"`
+	UpstreamAuthRefreshedAt      int64   `json:"upstream_auth_refreshed_at"`
+	UpstreamAuthRefreshError     string  `json:"upstream_auth_refresh_error"`
+	SessionConfigured            bool    `json:"session_configured"`
 }
 
 type ChannelUpstreamProfileInput struct {
-	KeyLabel                    string  `json:"key_label"`
-	UpstreamAccount             string  `json:"upstream_account"`
-	UpstreamPassword            string  `json:"upstream_password"`
-	UpstreamLoginUrl            string  `json:"upstream_login_url"`
-	UpstreamGroup               string  `json:"upstream_group"`
-	UpstreamGroupRatio          float64 `json:"upstream_group_ratio"`
-	UpstreamTopupRatio          float64 `json:"upstream_topup_ratio"`
-	UpstreamGroupRatios         string  `json:"upstream_group_ratios"`
-	AutoPriorityEnabled         *bool   `json:"auto_priority_enabled"`
-	AutoPriorityBase            int64   `json:"auto_priority_base"`
-	AutoPriorityMin             int64   `json:"auto_priority_min"`
-	AutoPriorityMax             int64   `json:"auto_priority_max"`
-	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
-	NotifyEnabled               *bool   `json:"notify_enabled"`
-	UpstreamAuthType            string  `json:"upstream_auth_type"`
-	UpstreamAccessToken         string  `json:"upstream_access_token"`
-	UpstreamRefreshToken        string  `json:"upstream_refresh_token"`
-	UpstreamAccessTokenExpiresIn int64  `json:"upstream_access_token_expires_in"`
+	KeyLabel                     string  `json:"key_label"`
+	UpstreamAccount              string  `json:"upstream_account"`
+	UpstreamPassword             string  `json:"upstream_password"`
+	UpstreamLoginUrl             string  `json:"upstream_login_url"`
+	UpstreamGroup                string  `json:"upstream_group"`
+	UpstreamGroupRatio           float64 `json:"upstream_group_ratio"`
+	UpstreamTopupRatio           float64 `json:"upstream_topup_ratio"`
+	UpstreamGroupRatios          string  `json:"upstream_group_ratios"`
+	AutoPriorityEnabled          *bool   `json:"auto_priority_enabled"`
+	AutoPriorityBase             int64   `json:"auto_priority_base"`
+	AutoPriorityMin              int64   `json:"auto_priority_min"`
+	AutoPriorityMax              int64   `json:"auto_priority_max"`
+	InsufficientBalanceKeywords  string  `json:"insufficient_balance_keywords"`
+	NotifyEnabled                *bool   `json:"notify_enabled"`
+	UpstreamAuthType             string  `json:"upstream_auth_type"`
+	UpstreamAccessToken          string  `json:"upstream_access_token"`
+	UpstreamRefreshToken         string  `json:"upstream_refresh_token"`
+	UpstreamAccessTokenExpiresIn int64   `json:"upstream_access_token_expires_in"`
 }
 
 type ChannelUpstreamProfilePatch struct {
@@ -140,39 +140,39 @@ func primaryChannelKey(raw string) string {
 func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 	topupRatio := normalizeUpstreamTopupRatio(profile.UpstreamTopupRatio)
 	return ChannelUpstreamProfileSummary{
-		Id:                          profile.Id,
-		ChannelId:                   profile.ChannelId,
-		KeyFingerprint:              profile.KeyFingerprint,
-		KeyMasked:                   profile.KeyMasked,
-		KeyLabel:                    profile.KeyLabel,
-		UpstreamAccount:             profile.UpstreamAccount,
-		UpstreamLoginUrl:            profile.UpstreamLoginUrl,
-		UpstreamGroup:               profile.UpstreamGroup,
-		UpstreamGroupRatio:          profile.UpstreamGroupRatio,
-		UpstreamTopupRatio:          topupRatio,
-		UpstreamEffectiveRatio:      CalculateUpstreamEffectiveRatio(profile.UpstreamGroupRatio, topupRatio),
-		UpstreamGroupRatios:         profile.UpstreamGroupRatios,
-		AutoPriorityEnabled:         profile.AutoPriorityEnabled,
-		AutoPriorityBase:            normalizeAutoPriorityBase(profile.AutoPriorityBase),
-		AutoPriorityMin:             normalizeAutoPriorityMin(profile.AutoPriorityMin),
-		AutoPriorityMax:             normalizeAutoPriorityMax(profile.AutoPriorityMin, profile.AutoPriorityMax),
-		AutoPriorityValue:           profile.AutoPriorityValue,
-		AutoPriorityUpdatedAt:       profile.AutoPriorityUpdatedAt,
-		AutoPriorityReason:          profile.AutoPriorityReason,
-		InsufficientBalanceKeywords: profile.InsufficientBalanceKeywords,
-		NotifyEnabled:               profile.NotifyEnabled,
-		PasswordConfigured:          profile.UpstreamPasswordEnc != "",
-		LastInsufficientAt:          profile.LastInsufficientAt,
-		LastInsufficientReason:      profile.LastInsufficientReason,
-		LastNotifiedAt:              profile.LastNotifiedAt,
-		NotifySuppressUntil:         profile.NotifySuppressUntil,
-		CreatedAt:                   profile.CreatedAt,
-		UpdatedAt:                   profile.UpdatedAt,
-		UpstreamAuthType:            profile.UpstreamAuthType,
+		Id:                           profile.Id,
+		ChannelId:                    profile.ChannelId,
+		KeyFingerprint:               profile.KeyFingerprint,
+		KeyMasked:                    profile.KeyMasked,
+		KeyLabel:                     profile.KeyLabel,
+		UpstreamAccount:              profile.UpstreamAccount,
+		UpstreamLoginUrl:             profile.UpstreamLoginUrl,
+		UpstreamGroup:                profile.UpstreamGroup,
+		UpstreamGroupRatio:           profile.UpstreamGroupRatio,
+		UpstreamTopupRatio:           topupRatio,
+		UpstreamEffectiveRatio:       CalculateUpstreamEffectiveRatio(profile.UpstreamGroupRatio, topupRatio),
+		UpstreamGroupRatios:          profile.UpstreamGroupRatios,
+		AutoPriorityEnabled:          profile.AutoPriorityEnabled,
+		AutoPriorityBase:             normalizeAutoPriorityBase(profile.AutoPriorityBase),
+		AutoPriorityMin:              normalizeAutoPriorityMin(profile.AutoPriorityMin),
+		AutoPriorityMax:              normalizeAutoPriorityMax(profile.AutoPriorityMin, profile.AutoPriorityMax),
+		AutoPriorityValue:            profile.AutoPriorityValue,
+		AutoPriorityUpdatedAt:        profile.AutoPriorityUpdatedAt,
+		AutoPriorityReason:           profile.AutoPriorityReason,
+		InsufficientBalanceKeywords:  profile.InsufficientBalanceKeywords,
+		NotifyEnabled:                profile.NotifyEnabled,
+		PasswordConfigured:           profile.UpstreamPasswordEnc != "",
+		LastInsufficientAt:           profile.LastInsufficientAt,
+		LastInsufficientReason:       profile.LastInsufficientReason,
+		LastNotifiedAt:               profile.LastNotifiedAt,
+		NotifySuppressUntil:          profile.NotifySuppressUntil,
+		CreatedAt:                    profile.CreatedAt,
+		UpdatedAt:                    profile.UpdatedAt,
+		UpstreamAuthType:             profile.UpstreamAuthType,
 		UpstreamAccessTokenExpiresAt: profile.UpstreamAccessTokenExpiresAt,
-		UpstreamAuthRefreshedAt:     profile.UpstreamAuthRefreshedAt,
-		UpstreamAuthRefreshError:    profile.UpstreamAuthRefreshError,
-		SessionConfigured:           profile.UpstreamAccessTokenEnc != "" || profile.UpstreamRefreshTokenEnc != "",
+		UpstreamAuthRefreshedAt:      profile.UpstreamAuthRefreshedAt,
+		UpstreamAuthRefreshError:     profile.UpstreamAuthRefreshError,
+		SessionConfigured:            profile.UpstreamAccessTokenEnc != "" || profile.UpstreamRefreshTokenEnc != "",
 	}
 }
 
@@ -216,16 +216,31 @@ func normalizeAutoPriorityMax(minValue int64, maxValue int64) int64 {
 	return maxValue
 }
 
+// upstreamGroupSnapshotRaw 与 service 包中的 UpstreamGroupSnapshotEntry 保持同步
+type upstreamGroupSnapshotRaw struct {
+	RateMultiplier float64 `json:"rate_multiplier"`
+}
+
 func ParseUpstreamGroupRatios(raw string) map[string]float64 {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
+	// 格式 1: 简单倍率 map，如 {"group": 1.5}
 	ratios := make(map[string]float64)
-	if err := common.UnmarshalJsonStr(raw, &ratios); err != nil {
-		return nil
+	if err := common.UnmarshalJsonStr(raw, &ratios); err == nil {
+		return ratios
 	}
-	return ratios
+	// 格式 2: sub2api 快照格式，如 {"group": {"rate_multiplier": 0.95, ...}}
+	snapshot := make(map[string]upstreamGroupSnapshotRaw)
+	if err := common.UnmarshalJsonStr(raw, &snapshot); err == nil && len(snapshot) > 0 {
+		ratios = make(map[string]float64, len(snapshot))
+		for name, entry := range snapshot {
+			ratios[name] = entry.RateMultiplier
+		}
+		return ratios
+	}
+	return nil
 }
 
 func HasUpstreamGroupRatio(raw string, group string) bool {

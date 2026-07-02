@@ -3,6 +3,9 @@ package model
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrimaryChannelKeyReturnsFirstKey(t *testing.T) {
@@ -65,4 +68,38 @@ func TestCalculateAutoPriorityValueClampsAndSkipsInvalidRatio(t *testing.T) {
 	if !strings.Contains(reason, "skip") {
 		t.Fatalf("expected skip reason, got %q", reason)
 	}
+}
+
+func TestParseUpstreamGroupRatiosSupportsFlatAndSnapshotFormats(t *testing.T) {
+	t.Run("flat map", func(t *testing.T) {
+		ratios := ParseUpstreamGroupRatios(`{"default":1,"特惠分组":0.06}`)
+		require.NotNil(t, ratios)
+		assert.Equal(t, map[string]float64{
+			"default": 1,
+			"特惠分组":    0.06,
+		}, ratios)
+	})
+
+	t.Run("snapshot map", func(t *testing.T) {
+		ratios := ParseUpstreamGroupRatios(`{
+			"稳定puls":{"rate_multiplier":0.95,"platform":"openai"},
+			"Kiro高缓":{"rate_multiplier":2,"platform":"anthropic"}
+		}`)
+		require.NotNil(t, ratios)
+		assert.Equal(t, map[string]float64{
+			"稳定puls": 0.95,
+			"Kiro高缓": 2,
+		}, ratios)
+	})
+}
+
+func TestIsUpstreamGroupMissingSupportsSnapshotFormat(t *testing.T) {
+	raw := `{
+		"稳定puls":{"rate_multiplier":0.95,"platform":"openai"},
+		"Kiro高缓":{"rate_multiplier":2,"platform":"anthropic"}
+	}`
+
+	assert.False(t, IsUpstreamGroupMissing(raw, "稳定puls"))
+	assert.True(t, HasUpstreamGroupRatio(raw, "Kiro高缓"))
+	assert.True(t, IsUpstreamGroupMissing(raw, "不存在的分组"))
 }
