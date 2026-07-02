@@ -996,6 +996,15 @@ func fetchAuthenticatedUpstreamBody(ctx context.Context, baseURL string, fullURL
 	if channelID == 0 {
 		return nil, errors.New("channel id is required for authenticated upstream fetch")
 	}
+
+	// 优先使用 profile-aware 会话凭据
+	profile, profileErr := model.GetChannelUpstreamProfileByChannelId(channelID)
+	if profileErr == nil && profile != nil &&
+		strings.TrimSpace(profile.UpstreamAuthType) != "" &&
+		profile.UpstreamAuthType != model.AuthTypeLegacyPasswordExplicit {
+		return fetchAuthenticatedBodyWithSessionAuth(ctx, baseURL, fullURL, profile)
+	}
+
 	credential, credentialErr := upstreamCredentialFromProfile(channelID)
 	if credentialErr != nil {
 		return nil, credentialErr
@@ -1013,6 +1022,43 @@ func fetchAuthenticatedUpstreamBody(ctx context.Context, baseURL string, fullURL
 	}
 	req.Header.Set("New-Api-User", userID)
 	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("authenticated upstream returned %s", resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxRatioConfigBytes))
+}
+
+// fetchAuthenticatedBodyWithSessionAuth 用会话凭据认证后获取上游响应体。
+// 使用 EnsureUpstreamAccessToken 获取 access token，不再通过拉业务接口触发 refresh。
+func fetchAuthenticatedBodyWithSessionAuth(ctx context.Context, baseURL string, fullURL string, profile *model.ChannelUpstreamProfile) ([]byte, error) {
+	// 解析 identity（优先 identity + legacy fallback）
+	identity, err := profile.ResolveIdentity()
+	if err != nil || identity == nil {
+		return nil, fmt.Errorf("resolve upstream identity failed: %w", err)
+	}
+
+	authType := strings.TrimSpace(identity.AuthType)
+	if authType != model.AuthTypeSub2APIAccessToken && authType != model.AuthTypeSub2APIRefreshToken {
+		// 如果是 legacy_password 模式，不应该走到这里（调用方应该走密码登录路径）
+		return nil, fmt.Errorf("unsupported auth type for session auth: %s", authType)
+	}
+
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	accessToken, err := service.EnsureUpstreamAccessToken(ctx, httpClient, identity)
+	if err != nil {
+		return nil, fmt.Errorf("ensure upstream access token failed: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

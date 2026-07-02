@@ -295,6 +295,7 @@ func migrateDB() error {
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&ChannelUpstreamProfile{},
+		&UpstreamIdentity{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
@@ -310,6 +311,12 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+
+	// Phase A: 将已存在的 profile 关联到 UpstreamIdentity（不清空 legacy 字段）
+	if err := migrateProfilesToUpstreamIdentity(); err != nil {
+		common.SysLog("upstream identity migration warning: " + err.Error())
+		// 迁移失败不阻塞启动
 	}
 	return nil
 }
@@ -348,6 +355,7 @@ func migrateDBFast() error {
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
 		{&ChannelUpstreamProfile{}, "ChannelUpstreamProfile"},
+	{&UpstreamIdentity{}, "UpstreamIdentity"},
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
@@ -819,5 +827,83 @@ func PingDB() error {
 
 	lastPingTime = time.Now()
 	common.SysLog("Database pinged successfully")
+	return nil
+}
+
+// migrateProfilesToUpstreamIdentity Phase A 数据迁移：
+// 将所有 upstream_account != '' 的 profile 关联到 UpstreamIdentity，并将凭据字段复制过去。
+// 不清空 profile 上的 legacy 字段（Phase B 再清理）。
+func migrateProfilesToUpstreamIdentity() error {
+	var profiles []ChannelUpstreamProfile
+	if err := DB.Where("(upstream_account != '' OR upstream_auth_type != '') AND (upstream_identity_id IS NULL OR upstream_identity_id = 0)").Find(&profiles).Error; err != nil {
+		return err
+	}
+	if len(profiles) == 0 {
+		return nil
+	}
+
+	now := common.GetTimestamp()
+	migrated := 0
+	for i := range profiles {
+		p := &profiles[i]
+		account := strings.TrimSpace(p.UpstreamAccount)
+		if account == "" {
+			continue
+		}
+
+		// 获取 channel 的 baseURL
+		baseURL := ""
+		channel, err := GetChannelById(p.ChannelId, false)
+		if err == nil && channel != nil {
+			baseURL = channel.GetBaseURL()
+		}
+		if baseURL == "" {
+			continue
+		}
+
+		// 查找或创建 identity
+		identity, _, err := EnsureUpstreamIdentity(baseURL, account)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("upstream identity migration: failed to ensure identity for channel #%d: %s", p.ChannelId, err.Error()))
+			continue
+		}
+
+		// 复制凭据字段到 identity（identity 的优先保留，profile 的作为补充）
+		identityUpdates := map[string]any{"updated_at": now}
+		if identity.PasswordEnc == "" && p.UpstreamPasswordEnc != "" {
+			identityUpdates["password_enc"] = p.UpstreamPasswordEnc
+		}
+		if identity.AuthType == "" && p.UpstreamAuthType != "" {
+			identityUpdates["auth_type"] = p.UpstreamAuthType
+		}
+		if identity.AccessTokenEnc == "" && p.UpstreamAccessTokenEnc != "" {
+			identityUpdates["access_token_enc"] = p.UpstreamAccessTokenEnc
+		}
+		if identity.RefreshTokenEnc == "" && p.UpstreamRefreshTokenEnc != "" {
+			identityUpdates["refresh_token_enc"] = p.UpstreamRefreshTokenEnc
+		}
+		if identity.AccessTokenExpiresAt == 0 && p.UpstreamAccessTokenExpiresAt > 0 {
+			identityUpdates["access_token_expires_at"] = p.UpstreamAccessTokenExpiresAt
+		}
+
+		if len(identityUpdates) > 1 {
+			if err := DB.Model(identity).Updates(identityUpdates).Error; err != nil {
+				common.SysLog(fmt.Sprintf("upstream identity migration: failed to update identity #%d: %s", identity.Id, err.Error()))
+			}
+		}
+
+		// 回填 UpstreamIdentityId
+		if p.UpstreamIdentityId == nil || *p.UpstreamIdentityId != identity.Id {
+			if err := DB.Model(p).Update("upstream_identity_id", identity.Id).Error; err != nil {
+				common.SysLog(fmt.Sprintf("upstream identity migration: failed to update profile #%d: %s", p.Id, err.Error()))
+				continue
+			}
+		}
+		migrated++
+	}
+
+	if migrated > 0 {
+		common.SysLog(fmt.Sprintf("upstream identity migration: %d profiles linked to identities", migrated))
+	}
 	return nil
 }

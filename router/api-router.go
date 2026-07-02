@@ -275,6 +275,14 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/upstream_updates/apply_all", controller.ApplyAllChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect", controller.DetectChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect_all", controller.DetectAllChannelUpstreamModelUpdates)
+
+				// 上游会话凭据管理（root-only，与获取上游密码同级保护）
+				authSessionRoute := channelRoute.Group("/:id/upstream_auth")
+				authSessionRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.SecureVerificationRequired())
+				{
+					authSessionRoute.POST("/session", controller.SetChannelUpstreamAuthSession)
+					authSessionRoute.DELETE("/session", controller.ClearChannelUpstreamAuthSession)
+				}
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

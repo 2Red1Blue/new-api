@@ -49,9 +49,29 @@ type UpstreamGroupRatiosResult struct {
 }
 
 // UpstreamCredentialFromProfileRecord 从 ChannelUpstreamProfile 提取凭据。
+// 优先读关联的 UpstreamIdentity；缺失时 fallback 到 profile legacy 字段。
 // account 为空 → nil（无凭据）；password 为空是允许的（sub2api token 直连模式）。
 // 解密失败 → nil（调用方应视情况返回用户友好错误）。
 func UpstreamCredentialFromProfileRecord(profile *model.ChannelUpstreamProfile) *UpstreamPricingCredential {
+	// 优先读 UpstreamIdentity
+	if identity, err := profile.ResolveIdentity(); err == nil && identity != nil {
+		account := strings.TrimSpace(identity.Account)
+		if account == "" {
+			return nil
+		}
+		password := ""
+		if strings.TrimSpace(identity.PasswordEnc) != "" {
+			var err error
+			password, err = DecryptUpstreamPassword(identity.PasswordEnc)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("failed to decrypt upstream password for channel #%d (identity #%d): %s", profile.ChannelId, identity.Id, err.Error()))
+				return nil
+			}
+		}
+		return &UpstreamPricingCredential{Account: account, Password: password}
+	}
+
+	// legacy fallback
 	account := strings.TrimSpace(profile.UpstreamAccount)
 	if account == "" {
 		return nil

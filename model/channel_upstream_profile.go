@@ -41,6 +41,17 @@ type ChannelUpstreamProfile struct {
 	NotifySuppressUntil         int64   `json:"notify_suppress_until" gorm:"bigint"`
 	CreatedAt                   int64   `json:"created_at" gorm:"bigint"`
 	UpdatedAt                   int64   `json:"updated_at" gorm:"bigint"`
+	// 上游会话凭据（refresh_token → access_token），用于避开 Turnstile 等浏览器验证
+	UpstreamAuthType            string `json:"upstream_auth_type" gorm:"type:varchar(32);default:''"`
+	UpstreamAccessTokenEnc      string `json:"-" gorm:"type:text"`
+	UpstreamRefreshTokenEnc     string `json:"-" gorm:"type:text"`
+	UpstreamAccessTokenExpiresAt int64  `json:"upstream_access_token_expires_at" gorm:"bigint;default:0"`
+	UpstreamAuthRefreshedAt     int64  `json:"upstream_auth_refreshed_at" gorm:"bigint;default:0"`
+	UpstreamAuthRefreshError    string `json:"upstream_auth_refresh_error" gorm:"type:varchar(512);default:''"`
+
+	// 关联上游身份，跨 channel 共享登录凭据和会话 token
+	UpstreamIdentityId *int64             `json:"upstream_identity_id" gorm:"index"`
+	UpstreamIdentity   *UpstreamIdentity  `json:"-" gorm:"-"`
 }
 
 type ChannelUpstreamProfileSummary struct {
@@ -72,6 +83,11 @@ type ChannelUpstreamProfileSummary struct {
 	NotifySuppressUntil         int64   `json:"notify_suppress_until"`
 	CreatedAt                   int64   `json:"created_at"`
 	UpdatedAt                   int64   `json:"updated_at"`
+	UpstreamAuthType            string  `json:"upstream_auth_type"`
+	UpstreamAccessTokenExpiresAt int64  `json:"upstream_access_token_expires_at"`
+	UpstreamAuthRefreshedAt     int64   `json:"upstream_auth_refreshed_at"`
+	UpstreamAuthRefreshError    string  `json:"upstream_auth_refresh_error"`
+	SessionConfigured           bool    `json:"session_configured"`
 }
 
 type ChannelUpstreamProfileInput struct {
@@ -89,6 +105,10 @@ type ChannelUpstreamProfileInput struct {
 	AutoPriorityMax             int64   `json:"auto_priority_max"`
 	InsufficientBalanceKeywords string  `json:"insufficient_balance_keywords"`
 	NotifyEnabled               *bool   `json:"notify_enabled"`
+	UpstreamAuthType            string  `json:"upstream_auth_type"`
+	UpstreamAccessToken         string  `json:"upstream_access_token"`
+	UpstreamRefreshToken        string  `json:"upstream_refresh_token"`
+	UpstreamAccessTokenExpiresIn int64  `json:"upstream_access_token_expires_in"`
 }
 
 type ChannelUpstreamProfilePatch struct {
@@ -148,6 +168,11 @@ func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 		NotifySuppressUntil:         profile.NotifySuppressUntil,
 		CreatedAt:                   profile.CreatedAt,
 		UpdatedAt:                   profile.UpdatedAt,
+		UpstreamAuthType:            profile.UpstreamAuthType,
+		UpstreamAccessTokenExpiresAt: profile.UpstreamAccessTokenExpiresAt,
+		UpstreamAuthRefreshedAt:     profile.UpstreamAuthRefreshedAt,
+		UpstreamAuthRefreshError:    profile.UpstreamAuthRefreshError,
+		SessionConfigured:           profile.UpstreamAccessTokenEnc != "" || profile.UpstreamRefreshTokenEnc != "",
 	}
 }
 
@@ -402,7 +427,7 @@ func GetChannelUpstreamProfilesByChannelIds(channelIds []int) (map[int]ChannelUp
 	return result, nil
 }
 
-func CloneChannelUpstreamProfiles(tx *gorm.DB, sourceChannelId int, targetChannelId int, now int64) error {
+func CloneChannelUpstreamProfiles(tx *gorm.DB, sourceChannelId int, targetChannelId int, targetBaseURL string, now int64) error {
 	if tx == nil {
 		tx = DB
 	}
@@ -428,7 +453,28 @@ func CloneChannelUpstreamProfiles(tx *gorm.DB, sourceChannelId int, targetChanne
 		clones = append(clones, profile)
 	}
 
-	return tx.Create(&clones).Error
+	if err := tx.Create(&clones).Error; err != nil {
+		return err
+	}
+
+	// 为目标渠道重新绑定 UpstreamIdentity（base_url 可能不同）
+	if strings.TrimSpace(targetBaseURL) != "" {
+		for i := range clones {
+			clone := &clones[i]
+			if strings.TrimSpace(clone.UpstreamAccount) == "" {
+				continue
+			}
+			identity, _, identityErr := EnsureUpstreamIdentity(targetBaseURL, clone.UpstreamAccount)
+			if identityErr == nil {
+				clone.UpstreamIdentityId = &identity.Id
+				_ = tx.Model(clone).Update("upstream_identity_id", identity.Id).Error
+			} else {
+				common.SysLog(fmt.Sprintf("CloneChannelUpstreamProfiles: skip identity rebind for target channel #%d: %s", targetChannelId, identityErr.Error()))
+			}
+		}
+	}
+
+	return nil
 }
 
 func UpsertChannelUpstreamProfile(channel *Channel, input ChannelUpstreamProfileInput, passwordEnc string) (*ChannelUpstreamProfile, error) {
@@ -487,6 +533,32 @@ func UpsertChannelUpstreamProfile(channel *Channel, input ChannelUpstreamProfile
 	if err != nil {
 		return profile, err
 	}
+
+	// 确保 profile 关联到 UpstreamIdentity（account 或 baseURL 变更时重绑定）
+	if strings.TrimSpace(profile.UpstreamAccount) != "" && strings.TrimSpace(channel.GetBaseURL()) != "" {
+		identity, _, identityErr := EnsureUpstreamIdentity(channel.GetBaseURL(), profile.UpstreamAccount)
+		if identityErr == nil && (profile.UpstreamIdentityId == nil || *profile.UpstreamIdentityId != identity.Id) {
+			profile.UpstreamIdentityId = &identity.Id
+			_ = DB.Model(profile).Update("upstream_identity_id", identity.Id).Error
+		}
+		// 同时将 profile 上的凭据字段同步到 identity（补充迁移后新增的数据）
+		if identityErr == nil && identity != nil {
+			identityNeedsUpdate := false
+			if identity.PasswordEnc == "" && profile.UpstreamPasswordEnc != "" {
+				identity.PasswordEnc = profile.UpstreamPasswordEnc
+				identityNeedsUpdate = true
+			}
+			if identity.AuthType == "" && strings.TrimSpace(profile.UpstreamAuthType) != "" {
+				identity.AuthType = profile.UpstreamAuthType
+				identityNeedsUpdate = true
+			}
+			if identityNeedsUpdate {
+				identity.UpdatedAt = common.GetTimestamp()
+				_ = DB.Save(identity).Error
+			}
+		}
+	}
+
 	return profile, ApplyChannelAutoPriority(channel.Id, shouldApplyAutoPriority(profile), profile.AutoPriorityValue)
 }
 
@@ -534,6 +606,31 @@ func UpdateChannelUpstreamProfile(channelId int, input ChannelUpstreamProfilePat
 	if err := DB.Save(profile).Error; err != nil {
 		return profile, err
 	}
+
+	// 确保 profile 关联到 UpstreamIdentity（account 或 baseURL 变更时重绑定）
+	if channel != nil && strings.TrimSpace(profile.UpstreamAccount) != "" && strings.TrimSpace(channel.GetBaseURL()) != "" {
+		identity, _, identityErr := EnsureUpstreamIdentity(channel.GetBaseURL(), profile.UpstreamAccount)
+		if identityErr == nil && (profile.UpstreamIdentityId == nil || *profile.UpstreamIdentityId != identity.Id) {
+			profile.UpstreamIdentityId = &identity.Id
+			_ = DB.Model(profile).Update("upstream_identity_id", identity.Id).Error
+		}
+		if identityErr == nil && identity != nil {
+			identityNeedsUpdate := false
+			if identity.PasswordEnc == "" && profile.UpstreamPasswordEnc != "" {
+				identity.PasswordEnc = profile.UpstreamPasswordEnc
+				identityNeedsUpdate = true
+			}
+			if identity.AuthType == "" && strings.TrimSpace(profile.UpstreamAuthType) != "" {
+				identity.AuthType = profile.UpstreamAuthType
+				identityNeedsUpdate = true
+			}
+			if identityNeedsUpdate {
+				identity.UpdatedAt = common.GetTimestamp()
+				_ = DB.Save(identity).Error
+			}
+		}
+	}
+
 	return profile, ApplyChannelAutoPriority(channelId, shouldApplyAutoPriority(profile), profile.AutoPriorityValue)
 }
 

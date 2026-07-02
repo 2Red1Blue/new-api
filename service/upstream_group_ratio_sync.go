@@ -43,17 +43,29 @@ func DisableChannelWhenUpstreamGroupMissing(profile *model.ChannelUpstreamProfil
 
 // syncChannelUpstreamGroupRatio 拉取单个 profile 的上游分组倍率并更新数据库
 func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUpstreamProfile) error {
+	// 优先从 UpstreamIdentity 获取 baseURL，其次从 profile 的 login_url 或 channel 的 base_url
 	baseURL := strings.TrimSpace(profile.UpstreamLoginUrl)
+	if baseURL == "" {
+		// 尝试从 identity 获取
+		if identity, err := profile.ResolveIdentity(); err == nil && identity != nil {
+			baseURL = strings.TrimSpace(identity.BaseURL)
+		}
+	}
 	if baseURL == "" {
 		return nil
 	}
 
-	credential := UpstreamCredentialFromProfileRecord(profile)
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	fetched, err := FetchUpstreamGroupRatios(ctx, client, baseURL, credential)
+	// 优先使用 profile-aware 入口（支持 session auth）
+	fetched, err := FetchUpstreamGroupRatiosFromProfile(ctx, client, baseURL, profile)
 	if err != nil {
-		return fmt.Errorf("获取分组倍率失败: %w", err)
+		// 回退到纯 credential 方式
+		credential := UpstreamCredentialFromProfileRecord(profile)
+		fetched, err = FetchUpstreamGroupRatios(ctx, client, baseURL, credential)
+		if err != nil {
+			return fmt.Errorf("获取分组倍率失败: %w", err)
+		}
 	}
 
 	groupName := strings.TrimSpace(profile.UpstreamGroup)

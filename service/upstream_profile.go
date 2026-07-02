@@ -227,16 +227,16 @@ func buildInsufficientBalanceEmail(profile *model.ChannelUpstreamProfile, ctx Up
 		channel.ChannelType,
 		emptyDash(ctx.ModelName),
 		emptyDash(ctx.UsingGroup),
-		emptyDash(profile.UpstreamAccount),
-		emptyDash(profile.UpstreamLoginUrl),
+		emptyDash(profileUpstreamAccount(profile)),
+		emptyDash(profileUpstreamLoginUrl(profile)),
 		emptyDash(profile.UpstreamGroup),
 		profile.UpstreamGroupRatio,
 		formatGroupRatios(profile.UpstreamGroupRatios),
 		emptyDash(profile.KeyMasked),
 		emptyDash(ctx.MatchedKeyword),
 		emptyDash(ctx.ErrorMessage),
-		emptyDash(profile.UpstreamLoginUrl),
-		emptyDash(profile.UpstreamAccount),
+		emptyDash(profileUpstreamLoginUrl(profile)),
+		emptyDash(profileUpstreamAccount(profile)),
 		statusText,
 	)
 	return subject, content
@@ -287,4 +287,24 @@ func IsInsufficientBalanceError(channelId int, usingKey string, message string) 
 
 func HumanSuppressWindow() string {
 	return (time.Duration(upstreamNotifySuppressSeconds) * time.Second).String()
+}
+
+// profileUpstreamAccount 优先读 identity，缺失时 fallback 到 profile legacy 字段
+func profileUpstreamAccount(profile *model.ChannelUpstreamProfile) string {
+	if identity, err := profile.ResolveIdentity(); err == nil && identity != nil {
+		if account := strings.TrimSpace(identity.Account); account != "" {
+			return account
+		}
+	}
+	return profile.UpstreamAccount
+}
+
+// profileUpstreamLoginUrl 优先读 identity 的 BaseURL，缺失时 fallback 到 profile legacy 字段
+func profileUpstreamLoginUrl(profile *model.ChannelUpstreamProfile) string {
+	if identity, err := profile.ResolveIdentity(); err == nil && identity != nil {
+		if baseURL := strings.TrimSpace(identity.BaseURL); baseURL != "" {
+			return baseURL
+		}
+	}
+	return profile.UpstreamLoginUrl
 }

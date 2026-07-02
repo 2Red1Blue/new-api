@@ -313,8 +313,53 @@ func FetchChannelUpstreamGroupRatios(c *gin.Context) {
 		return
 	}
 
+	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
+
+	// 优先使用 profile-aware 会话凭据（access_token / refresh_token 模式）
+	profile, profileErr := model.GetChannelUpstreamProfileByChannelId(channel.Id)
+	if profileErr == nil && profile != nil &&
+		strings.TrimSpace(profile.UpstreamAuthType) != "" &&
+		profile.UpstreamAuthType != model.AuthTypeLegacyPasswordExplicit {
+		fetchAndWriteUpstreamGroupRatiosFromProfile(c, baseURL, profile)
+		return
+	}
+
 	credential, credentialErr := upstreamCredentialFromProfile(channel.Id)
-	fetchAndWriteUpstreamGroupRatios(c, strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/"), credential, credentialErr)
+	fetchAndWriteUpstreamGroupRatios(c, baseURL, credential, credentialErr)
+}
+
+// fetchAndWriteUpstreamGroupRatiosFromProfile 通过 profile-aware 入口获取分组倍率并写入响应
+func fetchAndWriteUpstreamGroupRatiosFromProfile(c *gin.Context, baseURL string, profile *model.ChannelUpstreamProfile) {
+	if baseURL == "" || !strings.HasPrefix(baseURL, "http") {
+		common.ApiErrorMsg(c, "当前渠道没有有效的上游地址")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	result := UpstreamGroupRatiosFetchResponse{
+		GroupRatios: map[string]float64{},
+	}
+
+	fetched, err := service.FetchUpstreamGroupRatiosFromProfile(ctx, client, baseURL, profile)
+	if err != nil {
+		common.ApiErrorMsg(c, "分组倍率获取失败: "+err.Error())
+		return
+	}
+	result.GroupRatios = fetched.Ratios
+	result.GroupRatiosRaw = fetched.Raw
+	result.Source = fetched.Source
+
+	if topupRatio, ok, topupErr := service.FetchUpstreamTopupRatio(ctx, client, baseURL); topupErr == nil && ok {
+		result.TopupRatio = topupRatio
+		if result.Source == "" {
+			result.Source = baseURL + "/api/status"
+		}
+	}
+
+	common.ApiSuccess(c, result)
 }
 
 func PreviewChannelUpstreamGroupRatios(c *gin.Context) {
@@ -390,6 +435,196 @@ func upstreamCredentialFromProfile(channelId int) (*service.UpstreamPricingCrede
 		return nil, fmt.Errorf("上游密码解密失败，请重新保存上游密码")
 	}
 	return credential, nil
+}
+
+// --- 上游会话凭据管理 ---
+
+// SetChannelUpstreamAuthSessionRequest 上游会话凭据写入请求
+type SetChannelUpstreamAuthSessionRequest struct {
+	AuthType     string `json:"auth_type"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+}
+
+// SetChannelUpstreamAuthSession 设置渠道的上游会话凭据（access_token + refresh_token）。
+// 外部浏览器自动化完成首次登录后，通过此接口将 session 灌入 new-api。
+func SetChannelUpstreamAuthSession(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	var req SetChannelUpstreamAuthSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数格式错误"})
+		return
+	}
+
+	req.AuthType = strings.TrimSpace(req.AuthType)
+	req.AccessToken = strings.TrimSpace(req.AccessToken)
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+
+	if req.AuthType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "auth_type 不能为空"})
+		return
+	}
+
+	// 获取 channel 的 upstream profile（必须存在，不能创建无 key_fingerprint 的幽灵行）
+	profile, err := model.GetChannelUpstreamProfileByChannelId(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "该渠道尚无上游配置，请先在渠道中保存上游账号信息"})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	// 获取 channel 的 baseURL
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
+	if baseURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "该渠道未配置上游地址"})
+		return
+	}
+
+	// 获取上游账号（优先读 identity，缺失时 fallback 到 profile legacy 字段）
+	account := strings.TrimSpace(profile.UpstreamAccount)
+	if account == "" && profile.UpstreamIdentity != nil {
+		account = strings.TrimSpace(profile.UpstreamIdentity.Account)
+	}
+	if account == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "该渠道未配置上游账号，请先在渠道中保存上游账号信息"})
+		return
+	}
+
+	// 确保 UpstreamIdentity 存在并绑定到 profile
+	identity, _, ensureErr := model.EnsureUpstreamIdentity(baseURL, account)
+	if ensureErr != nil {
+		common.ApiError(c, ensureErr)
+		return
+	}
+
+	// 如果 profile 未绑定 identity，补绑定
+	now := common.GetTimestamp()
+	if profile.UpstreamIdentityId == nil || *profile.UpstreamIdentityId != identity.Id {
+		profile.UpstreamIdentityId = &identity.Id
+		profile.UpstreamIdentity = identity
+		if err := model.DB.Model(profile).Update("upstream_identity_id", identity.Id).Error; err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+
+	// 写入 session 到 UpstreamIdentity
+	identityUpdates := map[string]any{
+		"auth_type":          req.AuthType,
+		"auth_refreshed_at":  now,
+		"auth_refresh_error": "",
+		"updated_at":         now,
+	}
+
+	if req.AccessToken != "" {
+		accessEnc, encErr := service.EncryptUpstreamPassword(req.AccessToken)
+		if encErr != nil {
+			common.ApiError(c, fmt.Errorf("加密 access_token 失败: %w", encErr))
+			return
+		}
+		identityUpdates["access_token_enc"] = accessEnc
+	}
+
+	if req.RefreshToken != "" {
+		refreshEnc, encErr := service.EncryptUpstreamPassword(req.RefreshToken)
+		if encErr != nil {
+			common.ApiError(c, fmt.Errorf("加密 refresh_token 失败: %w", encErr))
+			return
+		}
+		identityUpdates["refresh_token_enc"] = refreshEnc
+	}
+
+	if req.ExpiresIn > 0 {
+		identityUpdates["access_token_expires_at"] = now + req.ExpiresIn
+	}
+
+	if err := model.DB.Model(identity).Updates(identityUpdates).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	recordManageAudit(c, "channel.upstream_auth_session.set", map[string]interface{}{
+		"channel_id": id,
+		"auth_type":  req.AuthType,
+	})
+
+	common.ApiSuccess(c, gin.H{"auth_type": req.AuthType})
+}
+
+// ClearChannelUpstreamAuthSession 清除渠道的上游会话凭据（在 UpstreamIdentity 上）。
+func ClearChannelUpstreamAuthSession(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	profile, err := model.GetChannelUpstreamProfileByChannelId(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiSuccess(c, nil)
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	// 先尝试清 identity
+	if profile.UpstreamIdentityId != nil && *profile.UpstreamIdentityId > 0 {
+		now := common.GetTimestamp()
+		result := model.DB.Model(&model.UpstreamIdentity{}).
+			Where("id = ?", *profile.UpstreamIdentityId).
+			Updates(map[string]any{
+				"auth_type":               "",
+				"access_token_enc":        "",
+				"refresh_token_enc":       "",
+				"access_token_expires_at": 0,
+				"auth_refreshed_at":        0,
+				"auth_refresh_error":      "",
+				"updated_at":              now,
+			})
+		if result.Error != nil {
+			common.ApiError(c, result.Error)
+			return
+		}
+	}
+
+	// 同时清 profile 上的 legacy session 字段（兼容旧数据）
+	now := common.GetTimestamp()
+	if err := model.DB.Model(&model.ChannelUpstreamProfile{}).
+		Where("channel_id = ?", id).
+		Updates(map[string]any{
+			"upstream_auth_type":               "",
+			"upstream_access_token_enc":        "",
+			"upstream_refresh_token_enc":       "",
+			"upstream_access_token_expires_at": 0,
+			"upstream_auth_refreshed_at":         0,
+			"upstream_auth_refresh_error":      "",
+			"updated_at":                       now,
+		}).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	recordManageAudit(c, "channel.upstream_auth_session.clear", map[string]interface{}{
+		"channel_id": id,
+	})
+
+	common.ApiSuccess(c, nil)
 }
 
 func FixChannelsAbilities(c *gin.Context) {
@@ -1571,7 +1806,7 @@ func CopyChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
 		return
 	}
-	if err := model.CloneChannelUpstreamProfiles(tx, origin.Id, clone.Id, now); err != nil {
+	if err := model.CloneChannelUpstreamProfiles(tx, origin.Id, clone.Id, strings.TrimRight(strings.TrimSpace(clone.GetBaseURL()), "/"), now); err != nil {
 		tx.Rollback()
 		common.SysError("failed to clone channel upstream profiles: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "复制渠道失败，请稍后重试"})
