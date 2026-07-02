@@ -16,16 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getUserModels } from '@/lib/api'
+
+import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Dialog } from '@/components/dialog'
+import { getUserModels } from '@/lib/api'
 
 const APP_CONFIGS = {
   claude: {
@@ -51,21 +52,6 @@ const APP_CONFIGS = {
 } as const
 
 type AppType = keyof typeof APP_CONFIGS
-
-const DEFAULT_PRIMARY_MODELS = {
-  claude: ['claude-opus-4-8', 'gpt-5.5'],
-  codex: ['gpt-5.5'],
-  gemini: ['gpt-5.5'],
-} satisfies Record<AppType, readonly string[]>
-
-function getDefaultPrimaryModel(
-  app: AppType,
-  availableModels: ReadonlySet<string>
-): string {
-  return (
-    DEFAULT_PRIMARY_MODELS[app].find((model) => availableModels.has(model)) || ''
-  )
-}
 
 function getServerAddress(): string {
   try {
@@ -106,7 +92,6 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   tokenKey: string
-  tokenGroup: string
 }
 
 export function CCSwitchDialog(props: Props) {
@@ -114,15 +99,10 @@ export function CCSwitchDialog(props: Props) {
   const [app, setApp] = useState<AppType>('claude')
   const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
   const [models, setModels] = useState<Record<string, string>>({})
-  const pendingDefaultAppRef = useRef<AppType | null>(null)
-  const modelGroup =
-    props.tokenGroup && props.tokenGroup !== 'auto'
-      ? props.tokenGroup
-      : undefined
 
   const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch', modelGroup],
-    queryFn: () => getUserModels(modelGroup),
+    queryKey: ['user-models-ccswitch'],
+    queryFn: getUserModels,
     enabled: props.open,
     staleTime: 5 * 60 * 1000,
   })
@@ -132,14 +112,8 @@ export function CCSwitchDialog(props: Props) {
     return items.map((m) => ({ value: m, label: m }))
   }, [modelsData?.data])
 
-  const modelSet = useMemo(
-    () => new Set(modelsData?.data ?? []),
-    [modelsData?.data]
-  )
-
   useEffect(() => {
     if (props.open) {
-      pendingDefaultAppRef.current = 'claude'
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setModels({})
 
@@ -149,31 +123,13 @@ export function CCSwitchDialog(props: Props) {
     }
   }, [props.open])
 
-  useEffect(() => {
-    if (!props.open || pendingDefaultAppRef.current !== app) return
-    const defaultPrimaryModel = getDefaultPrimaryModel(app, modelSet)
-    if (!defaultPrimaryModel) return
-
-    pendingDefaultAppRef.current = null
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setModels((prev) => ({ ...prev, model: defaultPrimaryModel }))
-  }, [app, modelSet, props.open])
-
   const currentConfig = APP_CONFIGS[app]
 
   const handleAppChange = (val: string) => {
     const appVal = val as AppType
-    pendingDefaultAppRef.current = appVal
     setApp(appVal)
     setName(APP_CONFIGS[appVal].defaultName)
     setModels({})
-  }
-
-  const handleModelChange = (fieldKey: string, value: string) => {
-    if (fieldKey === 'model') {
-      pendingDefaultAppRef.current = null
-    }
-    setModels((prev) => ({ ...prev, [fieldKey]: value }))
   }
 
   const handleSubmit = () => {
@@ -255,10 +211,11 @@ export function CCSwitchDialog(props: Props) {
             <ComboboxInput
               options={modelOptions}
               value={models[field.key] || ''}
-              onValueChange={(v) => handleModelChange(field.key, v)}
+              onValueChange={(v) =>
+                setModels((prev) => ({ ...prev, [field.key]: v }))
+              }
               placeholder={t('Select or enter model name')}
               emptyText={t('No models found')}
-              allowCustomValue={true}
             />
           </div>
         ))}

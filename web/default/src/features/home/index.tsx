@@ -17,25 +17,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
-import { Markdown } from '@/components/ui/markdown'
+
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
-import { Hero } from './components'
+import { RichContent } from '@/components/rich-content'
+import { isLikelyHtml } from '@/lib/content-format'
+import { useAuthStore } from '@/stores/auth-store'
+
+import { CTA, Features, Hero, HowItWorks, Stats } from './components'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
   const { t } = useTranslation()
+  const { auth } = useAuthStore()
+  const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
-  const homeBrand = t('Yunxi AI')
-  const homeTagline = t('A quieter harbor for everyday AI access.')
-  const homeSupportingNote = t('Built on new-api')
 
   if (!isLoaded) {
     return (
-      <PublicLayout
-        showMainContainer={false}
-        headerProps={{ forceInverse: true }}
-      >
+      <PublicLayout showMainContainer={false}>
         <main className='flex min-h-screen items-center justify-center'>
           <div className='text-muted-foreground'>{t('Loading...')}</div>
         </main>
@@ -44,46 +44,55 @@ export function Home() {
   }
 
   if (content) {
+    if (isUrl) {
+      return (
+        <PublicLayout showMainContainer={false}>
+          <iframe
+            src={content}
+            className='h-screen w-full border-none'
+            title={t('Custom Home Page')}
+            sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
+          />
+        </PublicLayout>
+      )
+    }
+
+    const contentIsHtml = isLikelyHtml(content)
+
+    if (contentIsHtml) {
+      return (
+        <PublicLayout showMainContainer={false}>
+          <RichContent
+            mode='html'
+            htmlVariant='isolated'
+            content={content}
+            className='custom-home-content'
+          />
+        </PublicLayout>
+      )
+    }
+
     return (
-      <PublicLayout
-        showMainContainer={false}
-        siteName={homeBrand}
-        headerProps={{ forceInverse: true }}
-      >
-        <main className='overflow-x-hidden'>
-          {isUrl ? (
-            <iframe
-              src={content}
-              className='h-screen w-full border-none'
-              title={t('Custom Home Page')}
-            />
-          ) : (
-            <div className='container mx-auto py-8'>
-              <Markdown className='custom-home-content'>{content}</Markdown>
-            </div>
-          )}
-        </main>
-        <Footer
-          brandName={homeBrand}
-          brandTagline={homeTagline}
-          supportingNote={homeSupportingNote}
-        />
+      <PublicLayout>
+        <div className='mx-auto max-w-6xl px-4 py-8'>
+          <RichContent
+            mode='markdown'
+            content={content}
+            className='custom-home-content'
+          />
+        </div>
       </PublicLayout>
     )
   }
 
   return (
-    <PublicLayout
-      showMainContainer={false}
-      siteName={homeBrand}
-      headerProps={{ forceInverse: true }}
-    >
-      <Hero />
-      <Footer
-        brandName={homeBrand}
-        brandTagline={homeTagline}
-        supportingNote={homeSupportingNote}
-      />
+    <PublicLayout showMainContainer={false}>
+      <Hero isAuthenticated={isAuthenticated} />
+      <Stats />
+      <Features />
+      <HowItWorks />
+      <CTA isAuthenticated={isAuthenticated} />
+      <Footer />
     </PublicLayout>
   )
 }

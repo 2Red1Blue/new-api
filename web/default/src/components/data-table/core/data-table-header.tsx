@@ -21,15 +21,16 @@ import {
   type Header,
   type Table as TanstackTable,
 } from '@tanstack/react-table'
+
 import { TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
+
 import { DataTableColumnHeader } from './column-header'
+import { isContentSizedColumn } from './content-sized-columns'
 import type { DataTableColumnClassName } from './types'
 
 type DataTableHeaderProps<TData> = {
   table: TanstackTable<TData>
   applyHeaderSize?: boolean
-  enableColumnResizing?: boolean
   className?: string
   rowClassName?: string
   getColumnClassName?: DataTableColumnClassName
@@ -38,7 +39,6 @@ type DataTableHeaderProps<TData> = {
 export function DataTableHeader<TData>({
   table,
   applyHeaderSize,
-  enableColumnResizing,
   className,
   rowClassName,
   getColumnClassName,
@@ -51,32 +51,27 @@ export function DataTableHeader<TData>({
             <TableHead
               key={header.id}
               colSpan={header.colSpan}
-              className={cn(
-                'relative',
-                getColumnClassName?.(header.column.id, 'header')
-              )}
-              style={applyHeaderSize ? { width: header.getSize() } : undefined}
+              className={getColumnClassName?.(header.column.id, 'header')}
+              style={getHeaderSizeStyle(header, applyHeaderSize)}
             >
               {renderHeaderContent(header)}
-              {enableColumnResizing && header.column.getCanResize() && (
-                <div
-                  onDoubleClick={() => header.column.resetSize()}
-                  onMouseDown={header.getResizeHandler()}
-                  onTouchStart={header.getResizeHandler()}
-                  className={cn(
-                    'absolute top-0 right-0 h-full w-2 cursor-col-resize touch-none select-none',
-                    'bg-border/60 opacity-0 transition-opacity hover:opacity-100',
-                    header.column.getIsResizing() && 'opacity-100'
-                  )}
-                  aria-hidden='true'
-                />
-              )}
             </TableHead>
           ))}
         </TableRow>
       ))}
     </TableHeader>
   )
+}
+
+function getHeaderSizeStyle<TData>(
+  header: Header<TData, unknown>,
+  applyHeaderSize: boolean | undefined
+) {
+  if (!applyHeaderSize || isContentSizedColumn(header.column.id)) {
+    return undefined
+  }
+
+  return { width: header.getSize() }
 }
 
 function renderHeaderContent<TData>(header: Header<TData, unknown>) {

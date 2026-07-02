@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import { API_ENDPOINTS } from './constants'
 import type {
   ChatCompletionRequest,
@@ -29,22 +30,23 @@ import type {
  * Send chat completion request (non-streaming)
  */
 export async function sendChatCompletion(
-  payload: ChatCompletionRequest
+  payload: ChatCompletionRequest,
+  signal?: AbortSignal
 ): Promise<ChatCompletionResponse> {
   const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
+    signal,
     skipErrorHandler: true,
   } as Record<string, unknown>)
   return res.data
 }
 
 /**
- * Get user available models, optionally filtered by group
+ * Get user available models
  */
-export async function getUserModels(group?: string): Promise<ModelOption[]> {
-  const url = group
-    ? `${API_ENDPOINTS.USER_MODELS}?group=${encodeURIComponent(group)}`
-    : API_ENDPOINTS.USER_MODELS
-  const res = await api.get(url)
+export async function getUserModels(group: string): Promise<ModelOption[]> {
+  const res = await api.get(API_ENDPOINTS.USER_MODELS, {
+    params: { group },
+  })
   const { data } = res
 
   if (!data.success || !Array.isArray(data.data)) {

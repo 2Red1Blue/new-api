@@ -16,21 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
-import { cn } from '@/lib/utils'
-import { useNotifications } from '@/hooks/use-notifications'
-import { useSystemConfig } from '@/hooks/use-system-config'
-import { useTopNavLinks } from '@/hooks/use-top-nav-links'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
+
 import { Dialog } from '@/components/dialog'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useNotifications } from '@/hooks/use-notifications'
+import { useSystemConfig } from '@/hooks/use-system-config'
+import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
 import { HeaderLogo } from './header-logo'
@@ -57,7 +59,6 @@ export interface PublicHeaderProps {
   showAuthButtons?: boolean
   showNotifications?: boolean
   className?: string
-  forceInverse?: boolean
 }
 
 export function PublicHeader(props: PublicHeaderProps) {
@@ -70,7 +71,6 @@ export function PublicHeader(props: PublicHeaderProps) {
     homeUrl = '/',
     showAuthButtons = true,
     showNotifications = true,
-    forceInverse = false,
   } = props
 
   const { t } = useTranslation()
@@ -92,7 +92,6 @@ export function PublicHeader(props: PublicHeaderProps) {
   const notifications = useNotifications()
   const routerState = useRouterState()
   const pathname = routerState.location.pathname
-  const autoOpenedPathRef = useRef<string | null>(null)
 
   const user = auth.user
   const isAuthenticated = !!user
@@ -112,39 +111,6 @@ export function PublicHeader(props: PublicHeaderProps) {
       document.body.style.overflow = ''
     }
   }, [mobileOpen])
-
-  useEffect(() => {
-    const isHomePage = pathname === '/'
-
-    if (!isHomePage) {
-      autoOpenedPathRef.current = null
-      return
-    }
-
-    if (notifications.loading || notifications.dialogOpen) {
-      return
-    }
-
-    if (!notifications.shouldAutoOpen) {
-      return
-    }
-
-    if (autoOpenedPathRef.current === pathname) {
-      return
-    }
-
-    autoOpenedPathRef.current = pathname
-    notifications.openDialog(
-      notifications.unreadNoticeCount > 0 ? 'notice' : 'announcements'
-    )
-  }, [
-    pathname,
-    notifications.loading,
-    notifications.dialogOpen,
-    notifications.shouldAutoOpen,
-    notifications.openDialog,
-    notifications.unreadNoticeCount,
-  ])
 
   useEffect(() => {
     if (!authPromptTarget) return
@@ -213,7 +179,6 @@ export function PublicHeader(props: PublicHeaderProps) {
         <div
           className={cn(
             'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-            forceInverse && 'text-white',
             scrolled ? 'max-w-[52rem] px-3 pt-3' : 'max-w-7xl px-4 pt-0 md:px-6'
           )}
         >
@@ -221,9 +186,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             className={cn(
               'flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
               scrolled
-                ? forceInverse
-                  ? 'h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_14px_40px_-18px_rgba(4,8,20,0.8)] ring-[0.5px] ring-white/12 bg-[#0d1530]/46 backdrop-blur-2xl'
-                  : 'bg-background/60 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_2px_16px_-6px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.02)] ring-[0.5px] backdrop-blur-2xl dark:shadow-[0_2px_16px_-6px_rgba(0,0,0,0.4)]'
+                ? 'bg-background/60 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_2px_16px_-6px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.02)] ring-[0.5px] backdrop-blur-2xl dark:shadow-[0_2px_16px_-6px_rgba(0,0,0,0.4)]'
                 : 'h-16 px-2'
             )}
           >
@@ -266,10 +229,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                       tabIndex={link.disabled ? -1 : undefined}
                       onClick={(event) => handleNavLinkClick(event, link)}
                       className={cn(
-                        'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
-                        forceInverse
-                          ? 'text-white/70 hover:text-white'
-                          : 'text-muted-foreground hover:text-foreground',
+                        'text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
                         link.disabled && 'pointer-events-none opacity-50'
                       )}
                     >
@@ -286,12 +246,8 @@ export function PublicHeader(props: PublicHeaderProps) {
                     className={cn(
                       'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
                       isActive
-                        ? forceInverse
-                          ? 'text-white'
-                          : 'text-foreground'
-                        : forceInverse
-                          ? 'text-white/70 hover:text-white'
-                          : 'text-muted-foreground hover:text-foreground',
+                        ? 'text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
                       link.disabled && 'pointer-events-none opacity-50'
                     )}
                   >
@@ -331,11 +287,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                   ) : (
                     <Button
                       size='sm'
-                      className={cn(
-                        'h-8 rounded-lg px-3.5 text-xs font-medium',
-                        forceInverse &&
-                          'border border-white/12 bg-white text-slate-900 hover:bg-white/92'
-                      )}
+                      className='h-8 rounded-lg px-3.5 text-xs font-medium'
                       render={<Link to='/sign-in' />}
                     >
                       {t('Sign in')}
@@ -403,13 +355,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                 mobileOpen
                   ? 'translate-y-0 opacity-100'
                   : 'translate-y-4 opacity-0',
-                isActive
-                  ? forceInverse
-                    ? 'text-white'
-                    : 'text-foreground'
-                  : forceInverse
-                    ? 'text-white/72'
-                    : 'text-muted-foreground',
+                isActive ? 'text-foreground' : 'text-muted-foreground',
                 link.disabled && 'pointer-events-none opacity-50'
               )
               const transitionStyle = {
