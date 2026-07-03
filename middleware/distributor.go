@@ -111,24 +111,30 @@ func Distribute() func(c *gin.Context) {
 								return
 							}
 						} else if channelSupportsRequestPath(preferred, c.Request.URL.Path) {
+							fallbackCandidates := preferred.GetFallbackCandidates(modelRequest.Model)
 							if usingGroup == "auto" {
-							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetUserAutoGroup(userGroup)
-							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-									selectGroup = g
-									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
-									channel = preferred
-									affinityUsable = true
-									service.MarkChannelAffinityUsed(c, g, preferred.Id)
-									break
+								userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+								autoGroups := service.GetUserAutoGroup(userGroup)
+								for _, g := range autoGroups {
+									if service.IsChannelSatisfiableForModel(preferred.Id, g, modelRequest.Model, fallbackCandidates) {
+										selectGroup = g
+										common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+										channel = preferred
+										affinityUsable = true
+										c.Set(service.ContextKeyBypassedAffinityForModel, false)
+										service.MarkChannelAffinityUsed(c, g, preferred.Id)
+										break
+									}
 								}
-							}
-							} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+							} else if service.IsChannelSatisfiableForModel(preferred.Id, usingGroup, modelRequest.Model, fallbackCandidates) {
 								channel = preferred
 								selectGroup = usingGroup
 								affinityUsable = true
+								c.Set(service.ContextKeyBypassedAffinityForModel, false)
 								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+							} else if service.IsModelUnavailableForChannel(preferred.Id, modelRequest.Model) {
+								// Negative cache hit: skip affinity, enter normal selection
+								c.Set(service.ContextKeyBypassedAffinityForModel, true)
 							}
 						}
 					}

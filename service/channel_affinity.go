@@ -72,6 +72,7 @@ type channelAffinityMeta struct {
 	SkipRetry        bool
 	BreakUnavailable bool
 	BreakRateLimit   bool
+	IncludeModelName bool
 	ParamTemplate    map[string]interface{}
 	KeySourceType    string
 	KeySourceKey     string
@@ -736,6 +737,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			SkipRetry:        rule.SkipRetryOnFailure,
 			BreakUnavailable: rule.BreakAffinityOnUnavailable,
 			BreakRateLimit:   rule.BreakAffinityOnRateLimit,
+			IncludeModelName: rule.IncludeModelName,
 			ParamTemplate:    cloneStringAnyMap(rule.ParamOverrideTemplate),
 			KeySourceType:    strings.TrimSpace(usedSource.Type),
 			KeySourceKey:     strings.TrimSpace(usedSource.Key),
@@ -920,6 +922,27 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	if setting == nil || !setting.Enabled {
 		return
 	}
+
+	// Guard: if affinity was bypassed due to model unavailability, don't overwrite
+	// non-model-scoped affinity bindings.
+	if c != nil && c.GetBool(ContextKeyBypassedAffinityForModel) {
+		meta, ok := getChannelAffinityMeta(c)
+		if !ok || !meta.IncludeModelName {
+			logger.LogInfo(c, "channel affinity: skip write-back, bypassed due to model unavailability")
+			return
+		}
+	}
+
+	// Guard: if model fallback was used for this request, don't overwrite
+	// non-model-scoped affinity bindings.
+	if c != nil && c.GetBool(ContextKeyModelFallbackUsed) {
+		meta, ok := getChannelAffinityMeta(c)
+		if !ok || !meta.IncludeModelName {
+			logger.LogInfo(c, "channel affinity: skip write-back, model fallback was used")
+			return
+		}
+	}
+
 	if setting.SwitchOnSuccess && c != nil {
 		if successChannelID := c.GetInt("channel_id"); successChannelID > 0 {
 			channelID = successChannelID

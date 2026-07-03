@@ -260,7 +260,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		isInsufficientBalance := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		chErr := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		isInsufficientBalance := chErr.isInsufficientBalance
+
+		if chErr.excludeCurrentChannel {
+			// Model not available: immediately exclude this channel (don't wait for 4-threshold)
+			if retryParam.Excluded != nil {
+				retryParam.Excluded[channel.Id] = struct{}{}
+			}
+			relayInfo.ChannelMeta = &relaycommon.ChannelMeta{}
+			retryParam.SetRetry(0)
+			retryParam.ResetRetryNextTry()
+			logger.LogInfo(c, fmt.Sprintf("channel #%d model not available for %s, excluded immediately", channel.Id, relayInfo.OriginModelName))
+			continue
+		}
+
 		channelFailureCount := recordRequestChannelFailure(retryParam, channel.Id)
 		if shouldExcludeChannelForRequestFailure(channelFailureCount) && retryParam.Excluded != nil {
 			retryParam.Excluded[channel.Id] = struct{}{}
@@ -549,9 +563,21 @@ func channelAffinityFailureExclusions(c *gin.Context, retryParam *service.RetryP
 	return excluded
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
+type channelErrorResult struct {
+	isInsufficientBalance bool
+	excludeCurrentChannel bool
+}
+
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) channelErrorResult {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	errorMessage := err.ErrorWithStatusCode()
+
+	// Check model-not-found to immediately exclude channel
+	if isModelNotFoundError(err) {
+		service.MarkModelUnavailableForChannel(channelError.ChannelId, c.GetString("original_model"))
+		return channelErrorResult{excludeCurrentChannel: true}
+	}
+
 	matchedKeyword, isInsufficientBalance := service.IsInsufficientBalanceError(channelError.ChannelId, channelError.UsingKey, errorMessage)
 	if isInsufficientBalance {
 		c.Set(upstreamInsufficientBalanceContextKey, true)
@@ -617,7 +643,25 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
-	return isInsufficientBalance
+	return channelErrorResult{isInsufficientBalance: isInsufficientBalance}
+}
+
+// isModelNotFoundError checks if an error indicates the model is genuinely unavailable.
+// Priority: structured error code > error type > keyword match.
+func isModelNotFoundError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	if err.StatusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	if err.GetErrorCode() == types.ErrorCodeModelNotFound ||
+		err.GetErrorCode() == types.ErrorCodeChannelModelNotAvailable {
+		return true
+	}
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "no available channel") ||
+		strings.Contains(errMsg, "无可用渠道")
 }
 
 func RelayMidjourney(c *gin.Context) {

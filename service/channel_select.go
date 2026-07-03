@@ -172,6 +172,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
 
+	// Merge negative cache exclusions with request-scoped exclusions.
+	mergedExcluded := make(map[int]struct{}, len(param.Excluded)+8)
+	for id := range param.Excluded {
+		mergedExcluded[id] = struct{}{}
+	}
+	for id := range GetUnavailableChannelIDs(param.ModelName) {
+		mergedExcluded[id] = struct{}{}
+	}
+
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
@@ -201,7 +210,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, err = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, param.ExcludedChannelIDs())
+			channel, err = model.GetRandomSatisfiedChannelWithExclusions(autoGroup, param.ModelName, priorityRetry, param.RequestPath, mergedExcluded)
 			setChannelSelectionInfo(param.Ctx, channelSelectionInfoFromParam(param, autoGroup, priorityRetry, i, channel, err))
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
@@ -240,7 +249,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, param.ExcludedChannelIDs())
+		channel, err = model.GetRandomSatisfiedChannelWithExclusions(param.TokenGroup, param.ModelName, param.GetRetry(), param.RequestPath, mergedExcluded)
 		setChannelSelectionInfo(param.Ctx, channelSelectionInfoFromParam(param, param.TokenGroup, param.GetRetry(), 0, channel, err))
 		if err != nil {
 			return nil, param.TokenGroup, err

@@ -515,6 +515,58 @@ func (channel *Channel) GetModelMapping() string {
 	return *channel.ModelMapping
 }
 
+var fallbackCandidateCache sync.Map // map[string][]string, key = "channelID:modelName"
+
+func (channel *Channel) GetFallbackCandidates(requestedModel string) []string {
+	cacheKey := fmt.Sprintf("%d:%s", channel.Id, requestedModel)
+	if cached, ok := fallbackCandidateCache.Load(cacheKey); ok {
+		return cached.([]string)
+	}
+	result := channel.parseFallbackCandidates(requestedModel)
+	fallbackCandidateCache.Store(cacheKey, result)
+	return result
+}
+
+func (channel *Channel) parseFallbackCandidates(requestedModel string) []string {
+	if channel.ModelMapping == nil || *channel.ModelMapping == "" {
+		return nil
+	}
+	var raw map[string]interface{}
+	if err := common.Unmarshal([]byte(*channel.ModelMapping), &raw); err != nil {
+		return nil
+	}
+	val, ok := raw[requestedModel]
+	if !ok {
+		return nil
+	}
+	switch v := val.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []string{v}
+	case []interface{}:
+		candidates := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				candidates = append(candidates, s)
+			}
+		}
+		return candidates
+	}
+	return nil
+}
+
+func InvalidateFallbackCandidateCache(channelID int) {
+	prefix := fmt.Sprintf("%d:", channelID)
+	fallbackCandidateCache.Range(func(k, _ interface{}) bool {
+		if strings.HasPrefix(k.(string), prefix) {
+			fallbackCandidateCache.Delete(k)
+		}
+		return true
+	})
+}
+
 func (channel *Channel) GetStatusCodeMapping() string {
 	if channel.StatusCodeMapping == nil {
 		return ""
@@ -529,6 +581,7 @@ func (channel *Channel) Insert() error {
 		return err
 	}
 	err = channel.AddAbilities(nil)
+	InvalidateFallbackCandidateCache(channel.Id)
 	return err
 }
 
@@ -578,6 +631,7 @@ func (channel *Channel) Update() error {
 	}
 	DB.Model(channel).First(channel, "id = ?", channel.Id)
 	err = channel.UpdateAbilities(nil)
+	InvalidateFallbackCandidateCache(channel.Id)
 	return err
 }
 
@@ -608,6 +662,7 @@ func (channel *Channel) Delete() error {
 		return err
 	}
 	err = channel.DeleteAbilities()
+	InvalidateFallbackCandidateCache(channel.Id)
 	return err
 }
 

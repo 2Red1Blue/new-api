@@ -148,14 +148,19 @@ func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry i
 		channels = filterChannelsByRequestPath(group2model2channels[group][normalizedModel], requestPath)
 	}
 
+	// Filter out excluded channels; if none remain after exclusion, try fallback expansion.
+	channels = filterExcluded(channels, excludedChannelIDs)
+	if len(channels) == 0 {
+		fallbackChannels := GetChannelsForGroupModelWithFallback(group, model)
+		channels = filterChannelsByRequestPath(fallbackChannels, requestPath)
+		channels = filterExcluded(channels, excludedChannelIDs)
+	}
+
 	if len(channels) == 0 {
 		return nil, nil
 	}
 
 	if len(channels) == 1 {
-		if _, excluded := excludedChannelIDs[channels[0]]; excluded {
-			return nil, nil
-		}
 		if channel, ok := channelsIDM[channels[0]]; ok {
 			return channel, nil
 		}
@@ -185,9 +190,6 @@ func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry i
 	var sumWeight = 0
 	var targetChannels []*Channel
 	for _, channelId := range channels {
-		if _, excluded := excludedChannelIDs[channelId]; excluded {
-			continue
-		}
 		if channel, ok := channelsIDM[channelId]; ok {
 			if channel.GetPriority() == targetPriority {
 				sumWeight += channel.GetWeight()
@@ -428,5 +430,96 @@ func CacheUpdateChannel(channel *Channel) {
 		logger.LogDebug(nil, "CacheUpdateChannel before: id=%d, name=%s, status=%d, polling_index=%d", channel.Id, channel.Name, channel.Status, oldChannel.ChannelInfo.MultiKeyPollingIndex)
 	}
 	channelsIDM[channel.Id] = channel
+	InvalidateFallbackCandidateCache(channel.Id)
 	logger.LogDebug(nil, "CacheUpdateChannel after: id=%d, name=%s, status=%d, polling_index=%d", channel.Id, channel.Name, channel.Status, channel.ChannelInfo.MultiKeyPollingIndex)
+}
+
+// GetActiveChannelIDs returns all enabled (active) channel IDs.
+func GetActiveChannelIDs() []int {
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	var ids []int
+	for id, ch := range channelsIDM {
+		if ch.Status == common.ChannelStatusEnabled {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// getChannelsForGroup returns all channel IDs for a group.
+func getChannelsForGroup(group string) []int {
+	ids := make(map[int]struct{})
+	for _, modelChannels := range group2model2channels[group] {
+		for _, chID := range modelChannels {
+			ids[chID] = struct{}{}
+		}
+	}
+	result := make([]int, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	return result
+}
+
+func unionChannelIDs(a, b []int) []int {
+	seen := make(map[int]struct{}, len(a)+len(b))
+	for _, id := range a {
+		seen[id] = struct{}{}
+	}
+	for _, id := range b {
+		seen[id] = struct{}{}
+	}
+	result := make([]int, 0, len(seen))
+	for id := range seen {
+		result = append(result, id)
+	}
+	return result
+}
+
+// GetChannelsForGroupModelWithFallback returns all channel candidates for a group+model,
+// including channels that can serve the model via fallback mapping.
+func GetChannelsForGroupModelWithFallback(group, requestedModel string) []int {
+	direct := group2model2channels[group][requestedModel]
+	normalized := group2model2channels[group][ratio_setting.FormatMatchingModelName(requestedModel)]
+	allDirect := unionChannelIDs(direct, normalized)
+
+	allChannelIDs := getChannelsForGroup(group)
+	var extended []int
+	for _, chID := range allChannelIDs {
+		ch, ok := channelsIDM[chID]
+		if !ok {
+			continue
+		}
+		candidates := ch.GetFallbackCandidates(requestedModel)
+		for _, candidate := range candidates {
+			if channelListContains(group2model2channels[group][candidate], chID) {
+				extended = append(extended, chID)
+				break
+			}
+		}
+	}
+	return unionChannelIDs(allDirect, extended)
+}
+
+func channelListContains(list []int, chID int) bool {
+	for _, id := range list {
+		if id == chID {
+			return true
+		}
+	}
+	return false
+}
+
+func filterExcluded(ids []int, excluded map[int]struct{}) []int {
+	if len(excluded) == 0 {
+		return ids
+	}
+	var result []int
+	for _, id := range ids {
+		if _, ok := excluded[id]; !ok {
+			result = append(result, id)
+		}
+	}
+	return result
 }
