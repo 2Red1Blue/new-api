@@ -21,10 +21,21 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
+import { StatusBadge } from '@/components/status-badge'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import { CHANNEL_STATUS } from '../constants'
-import { isTagAggregateRow, parseGroupsList } from '../lib'
+import {
+  getUpstreamEffectiveRatio,
+  isTagAggregateRow,
+  parseGroupsList,
+} from '../lib'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
@@ -66,6 +77,11 @@ function ChannelCardComponent({
   }
 
   const groups = parseGroupsList(row.original.group ?? '')
+  const upstreamProfile = row.original.upstream_profile
+  const upstreamGroupRatio = upstreamProfile?.upstream_group_ratio ?? 0
+  const effectiveRatio = getUpstreamEffectiveRatio(upstreamProfile)
+  const showUpstreamGroupRatio = !isTagRow && upstreamGroupRatio > 0
+  const showEffectiveRatio = !isTagRow && effectiveRatio > 0
 
   const selectCell = renderCell('select')
   const typeCell = renderCell('type')
@@ -156,8 +172,8 @@ function ChannelCardComponent({
           </div>
         </div>
 
-        {/* Last row: groups span the full width, showing every group (no label) */}
-        <div className='min-w-0'>
+        {/* Last row: groups span the full width, with upstream ratio badges underneath. */}
+        <div className='min-w-0 space-y-1.5'>
           {groups.length > 0 ? (
             <div className='-ml-1.5 flex flex-wrap gap-1'>
               {groups.map((g) => (
@@ -171,6 +187,54 @@ function ChannelCardComponent({
             </div>
           ) : (
             <span className='text-muted-foreground text-sm'>-</span>
+          )}
+          {(showUpstreamGroupRatio || showEffectiveRatio) && (
+            <div className='-ml-1.5 flex flex-wrap gap-1'>
+              {showUpstreamGroupRatio && (
+                <TooltipProvider delay={100}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <StatusBadge
+                          label={`${t('Upstream')} ${upstreamGroupRatio.toFixed(4)}x`}
+                          variant='neutral'
+                          size='sm'
+                          copyable={false}
+                          showDot={false}
+                          className='font-mono'
+                        />
+                      }
+                    />
+                    <TooltipContent side='top'>
+                      {t('Upstream Group Ratio')}: {upstreamGroupRatio.toFixed(4)}
+                      x
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {showEffectiveRatio && (
+                <TooltipProvider delay={100}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <StatusBadge
+                          label={`${t('Effective')} ${effectiveRatio.toFixed(4)}x`}
+                          variant='success'
+                          size='sm'
+                          copyable={false}
+                          showDot={false}
+                          className='font-mono'
+                        />
+                      }
+                    />
+                    <TooltipContent side='top'>
+                      {t('Effective Upstream Ratio')}: {effectiveRatio.toFixed(4)}
+                      x
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
           )}
         </div>
       </div>

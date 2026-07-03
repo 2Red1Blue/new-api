@@ -319,11 +319,16 @@ func FetchChannelUpstreamGroupRatios(c *gin.Context) {
 
 	// 优先使用 profile-aware 会话凭据（access_token / refresh_token 模式）
 	profile, profileErr := model.GetChannelUpstreamProfileByChannelId(channel.Id)
-	if profileErr == nil && profile != nil &&
-		strings.TrimSpace(profile.UpstreamAuthType) != "" &&
-		profile.UpstreamAuthType != model.AuthTypeLegacyPasswordExplicit {
-		fetchAndWriteUpstreamGroupRatiosFromProfile(c, baseURL, profile)
-		return
+	if profileErr == nil && profile != nil {
+		if identity, err := profile.ResolveIdentity(); err == nil && identity != nil && identity.HasSessionAuth() {
+			fetchAndWriteUpstreamGroupRatiosFromProfile(c, baseURL, profile)
+			return
+		}
+		if strings.TrimSpace(profile.UpstreamAuthType) != "" &&
+			profile.UpstreamAuthType != model.AuthTypeLegacyPasswordExplicit {
+			fetchAndWriteUpstreamGroupRatiosFromProfile(c, baseURL, profile)
+			return
+		}
 	}
 
 	credential, credentialErr := upstreamCredentialFromProfile(channel.Id)
@@ -595,7 +600,7 @@ func ClearChannelUpstreamAuthSession(c *gin.Context) {
 				"access_token_enc":        "",
 				"refresh_token_enc":       "",
 				"access_token_expires_at": 0,
-				"auth_refreshed_at":        0,
+				"auth_refreshed_at":       0,
 				"auth_refresh_error":      "",
 				"updated_at":              now,
 			})
@@ -614,7 +619,7 @@ func ClearChannelUpstreamAuthSession(c *gin.Context) {
 			"upstream_access_token_enc":        "",
 			"upstream_refresh_token_enc":       "",
 			"upstream_access_token_expires_at": 0,
-			"upstream_auth_refreshed_at":         0,
+			"upstream_auth_refreshed_at":       0,
 			"upstream_auth_refresh_error":      "",
 			"updated_at":                       now,
 		}).Error; err != nil {

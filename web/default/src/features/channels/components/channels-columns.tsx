@@ -62,6 +62,7 @@ import {
   getBalanceVariant,
   getChannelTypeIcon,
   getChannelTypeLabel,
+  getUpstreamEffectiveRatio,
   getResponseTimeConfig,
   isMultiKeyChannel,
   parseModelsList,
@@ -505,6 +506,79 @@ function BalanceCell({ channel }: { channel: Channel }) {
         isRefreshing={isUpdating}
       />
     </TooltipProvider>
+  )
+}
+
+function ChannelGroupsCell({ channel }: { channel: Channel }) {
+  const { t } = useTranslation()
+  const { sensitiveVisible } = useChannels()
+  const groupArray = parseGroupsList(channel.group)
+  const upstreamProfile = channel.upstream_profile
+  const upstreamGroupRatio = upstreamProfile?.upstream_group_ratio ?? 0
+  const effectiveRatio = getUpstreamEffectiveRatio(upstreamProfile)
+  const showUpstreamGroupRatio =
+    !isTagAggregateRow(channel) && upstreamGroupRatio > 0
+  const showEffectiveRatio = !isTagAggregateRow(channel) && effectiveRatio > 0
+
+  return (
+    <div className='flex min-w-0 flex-col gap-1.5'>
+      <BadgeListCell
+        items={groupArray.map((group) => (
+          <GroupBadge
+            key={group}
+            group={group}
+            label={sensitiveVisible ? undefined : SENSITIVE_MASK}
+            size='sm'
+          />
+        ))}
+      />
+      {(showUpstreamGroupRatio || showEffectiveRatio) && (
+        <div className='-ml-1.5 flex flex-wrap gap-1'>
+          {showUpstreamGroupRatio && (
+            <TooltipProvider delay={100}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <StatusBadge
+                      label={`${t('Upstream')} ${upstreamGroupRatio.toFixed(4)}x`}
+                      variant='neutral'
+                      size='sm'
+                      copyable={false}
+                      showDot={false}
+                      className='font-mono'
+                    />
+                  }
+                />
+                <TooltipContent side='top'>
+                  {t('Upstream Group Ratio')}: {upstreamGroupRatio.toFixed(4)}x
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {showEffectiveRatio && (
+            <TooltipProvider delay={100}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <StatusBadge
+                      label={`${t('Effective')} ${effectiveRatio.toFixed(4)}x`}
+                      variant='success'
+                      size='sm'
+                      copyable={false}
+                      showDot={false}
+                      className='font-mono'
+                    />
+                  }
+                />
+                <TooltipContent side='top'>
+                  {t('Effective Upstream Ratio')}: {effectiveRatio.toFixed(4)}x
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -983,22 +1057,7 @@ export function useChannelsColumns(
         accessorKey: 'group',
         header: t('Groups'),
         meta: { mobileHidden: true },
-        cell: ({ row }) => {
-          const group = row.getValue('group') as string
-          const groupArray = parseGroupsList(group)
-          return (
-            <BadgeListCell
-              items={groupArray.map((g) => (
-                <GroupBadge
-                  key={g}
-                  group={g}
-                  label={sensitiveVisible ? undefined : SENSITIVE_MASK}
-                  size='sm'
-                />
-              ))}
-            />
-          )
-        },
+        cell: ({ row }) => <ChannelGroupsCell channel={row.original} />,
         filterFn: (row, id, value) => {
           if (!value || value.length === 0 || value.includes('all')) {
             return true

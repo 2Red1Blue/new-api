@@ -121,12 +121,16 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
+  fetchUpstreamGroupRatios,
   fetchModels,
   getAllModels,
   getChannel,
   getChannelKey,
+  getChannelUpstreamPassword,
   getGroups,
   getPrefillGroups,
+  getUpstreamPasswordFeature,
+  previewUpstreamGroupRatios,
   refreshCodexCredential,
 } from '../../api'
 import {
@@ -597,6 +601,10 @@ export function ChannelMutateDrawer({
   const [fetchModelsDialogOpen, setFetchModelsDialogOpen] = useState(false)
   const [channelKey, setChannelKey] = useState<string | null>(null)
   const [isChannelKeyLoading, setIsChannelKeyLoading] = useState(false)
+  const [upstreamPassword, setUpstreamPassword] = useState<string | null>(null)
+  const [isUpstreamPasswordLoading, setIsUpstreamPasswordLoading] =
+    useState(false)
+  const [isUpstreamRatiosLoading, setIsUpstreamRatiosLoading] = useState(false)
   const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
     useState(false)
   const initialModelsRef = useRef<string[]>([])
@@ -656,6 +664,12 @@ export function ChannelMutateDrawer({
     queryFn: () => getPrefillGroups('model'),
   })
 
+  const { data: upstreamPasswordFeatureData } = useQuery({
+    queryKey: ['channel-upstream-password-feature'],
+    queryFn: getUpstreamPasswordFeature,
+    enabled: open && isEditing && canRevealChannelKey,
+  })
+
   const { copyToClipboard } = useCopyToClipboard()
 
   const {
@@ -673,8 +687,11 @@ export function ChannelMutateDrawer({
     if (!open) {
       setChannelKey(null)
       setIsChannelKeyLoading(false)
+      setUpstreamPassword(null)
+      setIsUpstreamPasswordLoading(false)
     } else if (channelId) {
       setChannelKey(null)
+      setUpstreamPassword(null)
     }
   }, [open, channelId])
 
@@ -726,6 +743,11 @@ export function ChannelMutateDrawer({
   const currentProxy = form.watch('proxy')
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
+  const currentUpstreamAccount = form.watch('upstream_account')
+  const currentUpstreamPassword = form.watch('upstream_password')
+  const currentUpstreamLoginUrl = form.watch('upstream_login_url')
+  const currentUpstreamGroup = form.watch('upstream_group')
+  const currentUpstreamGroupRatios = form.watch('upstream_group_ratios')
   const currentAllowServiceTier = form.watch('allow_service_tier')
   const currentDisableStore = form.watch('disable_store')
   const currentAllowSafetyIdentifier = form.watch('allow_safety_identifier')
@@ -761,6 +783,10 @@ export function ChannelMutateDrawer({
   const isBatchMode =
     multiKeyMode === 'batch' || multiKeyMode === 'multi_to_single'
   const isChannelDetailLoading = isEditing && isChannelLoading
+  const canRevealUpstreamPassword =
+    canRevealChannelKey &&
+    upstreamPasswordFeatureData?.data?.enabled === true &&
+    upstreamPasswordFeatureData?.data?.reveal_enabled === true
   const supportsMultiKeyAddMode =
     currentType !== 57 && !(currentType === 41 && vertexKeyType === 'api_key')
   const addModeOptions = useMemo(
@@ -1294,6 +1320,103 @@ export function ChannelMutateDrawer({
       }
     }
   }, [channelId, withVerification, fetchChannelKey])
+
+  const fetchCurrentUpstreamPassword = useCallback(async () => {
+    if (!channelId) {
+      throw new Error('Channel is not selected')
+    }
+
+    setIsUpstreamPasswordLoading(true)
+    try {
+      const res = await getChannelUpstreamPassword(channelId)
+      if (!res.success) {
+        throw new Error(
+          res.message || t('Failed to fetch upstream password')
+        )
+      }
+
+      const passwordValue = res.data?.password ?? ''
+      setUpstreamPassword(passwordValue)
+      toast.success(t('Upstream password unlocked'))
+      return res
+    } finally {
+      setIsUpstreamPasswordLoading(false)
+    }
+  }, [channelId, t])
+
+  const handleRevealUpstreamPassword = useCallback(async () => {
+    if (!channelId) return
+
+    try {
+      await withVerification(fetchCurrentUpstreamPassword, {
+        preferredMethod: 'passkey',
+        title: 'Verify to view upstream password',
+        description:
+          'Use Passkey or 2FA to confirm your identity before revealing the saved upstream password.',
+      })
+    } catch (error) {
+      if (error instanceof Error) {
+        toast.error(error.message)
+      }
+    }
+  }, [channelId, withVerification, fetchCurrentUpstreamPassword])
+
+  const handleFetchUpstreamRatios = useCallback(async () => {
+    setIsUpstreamRatiosLoading(true)
+    try {
+      const response =
+        isEditing && channelId
+          ? await fetchUpstreamGroupRatios(channelId)
+          : await previewUpstreamGroupRatios({
+              base_url: form.getValues('base_url') || '',
+              type: form.getValues('type'),
+              key: form.getValues('key') || '',
+              upstream_account: form.getValues('upstream_account') || '',
+              upstream_password: form.getValues('upstream_password') || '',
+            })
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || t('Failed to fetch upstream ratios'))
+      }
+
+      const fetchedData = response.data
+      form.setValue('upstream_group_ratios', fetchedData.group_ratios_raw || '', {
+        shouldDirty: true,
+      })
+      if (
+        typeof fetchedData.topup_ratio === 'number' &&
+        fetchedData.topup_ratio > 0
+      ) {
+        form.setValue('upstream_topup_ratio', fetchedData.topup_ratio, {
+          shouldDirty: true,
+        })
+      }
+      const selectedGroup = form.getValues('upstream_group')?.trim()
+      if (
+        selectedGroup &&
+        typeof fetchedData.group_ratios?.[selectedGroup] === 'number'
+      ) {
+        form.setValue(
+          'upstream_group_ratio',
+          fetchedData.group_ratios[selectedGroup],
+          { shouldDirty: true }
+        )
+      }
+
+      toast.success(t('Upstream ratios updated'))
+      if (fetchedData.message) {
+        toast.info(fetchedData.message)
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to fetch upstream ratios')
+      )
+    } finally {
+      setIsUpstreamRatiosLoading(false)
+    }
+  }, [channelId, form, isEditing, t])
 
   const handleRefreshCodexCredential = useCallback(async () => {
     if (!channelId) return
@@ -2925,6 +3048,320 @@ export function ChannelMutateDrawer({
                                   )
                                 }}
                               />
+
+                              <div className='border-border/60 bg-muted/20 space-y-4 rounded-lg border p-4'>
+                                <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                                  <div className='space-y-1'>
+                                    <div className='flex items-center gap-2'>
+                                      <Server className='text-muted-foreground h-4 w-4' />
+                                      <p className='text-sm font-medium'>
+                                        {t('Upstream Information')}
+                                      </p>
+                                      {(currentUpstreamAccount?.trim() ||
+                                        currentUpstreamPassword?.trim() ||
+                                        currentUpstreamLoginUrl?.trim() ||
+                                        currentUpstreamGroup?.trim() ||
+                                        currentUpstreamGroupRatios?.trim()) && (
+                                        <Badge
+                                          variant='secondary'
+                                          className='w-fit'
+                                        >
+                                          {t('Configured')}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <p className='text-muted-foreground text-xs'>
+                                      {t(
+                                        'Save upstream login information and pricing metadata for ratio sync and alerts.'
+                                      )}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    type='button'
+                                    variant='outline'
+                                    size='sm'
+                                    onClick={handleFetchUpstreamRatios}
+                                    disabled={isUpstreamRatiosLoading}
+                                  >
+                                    {isUpstreamRatiosLoading ? (
+                                      <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                    ) : (
+                                      <RefreshCw className='mr-2 h-4 w-4' />
+                                    )}
+                                    {t('Fetch upstream ratios')}
+                                  </Button>
+                                </div>
+
+                                <div className='grid gap-4 sm:grid-cols-2'>
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_account'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Upstream Account')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder={t(
+                                              'Shown in insufficient balance notifications.'
+                                            )}
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Shown in insufficient balance notifications.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_login_url'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Upstream Login URL')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder='https://'
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Used when logging in to the upstream site before fetching ratios.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
+
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_password'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Upstream Password')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='password'
+                                          autoComplete='new-password'
+                                          placeholder={
+                                            isEditing
+                                              ? t(
+                                                  'Leave empty to keep existing password'
+                                                )
+                                              : t(
+                                                  'Optional. Keep blank if this upstream uses token or session auth.'
+                                                )
+                                          }
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t(
+                                          'Optional. Keep blank if this upstream uses token or session auth.'
+                                        )}
+                                      </FormDescription>
+                                      {isEditing &&
+                                        canRevealUpstreamPassword && (
+                                          <div className='border-border/60 mt-4 flex flex-col gap-3 border-y border-dashed py-4'>
+                                            <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                                              <div>
+                                                <p className='text-sm font-medium'>
+                                                  {t('Current password')}
+                                                </p>
+                                                <p className='text-muted-foreground text-xs'>
+                                                  {t(
+                                                    'Verification required to reveal the saved upstream password.'
+                                                  )}
+                                                </p>
+                                              </div>
+                                              <div className='flex items-center gap-2'>
+                                                <Button
+                                                  type='button'
+                                                  variant='outline'
+                                                  size='sm'
+                                                  onClick={
+                                                    handleRevealUpstreamPassword
+                                                  }
+                                                  disabled={
+                                                    isUpstreamPasswordLoading ||
+                                                    verificationState.loading
+                                                  }
+                                                >
+                                                  {isUpstreamPasswordLoading ||
+                                                  verificationState.loading ? (
+                                                    <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                                                  ) : (
+                                                    <Eye className='mr-2 h-4 w-4' />
+                                                  )}
+                                                  {t('Reveal password')}
+                                                </Button>
+                                                <Button
+                                                  type='button'
+                                                  variant='ghost'
+                                                  size='sm'
+                                                  onClick={async () => {
+                                                    if (upstreamPassword) {
+                                                      await copyToClipboard(
+                                                        upstreamPassword
+                                                      )
+                                                    }
+                                                  }}
+                                                  disabled={!upstreamPassword}
+                                                >
+                                                  <Copy className='mr-2 h-4 w-4' />
+                                                  {t('Copy')}
+                                                </Button>
+                                              </div>
+                                            </div>
+                                            <Input
+                                              readOnly
+                                              value={upstreamPassword ?? ''}
+                                              placeholder={t(
+                                                'Hidden — verify to reveal'
+                                              )}
+                                              className='font-mono'
+                                            />
+                                          </div>
+                                        )}
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <div className='grid gap-4 sm:grid-cols-2'>
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_group'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Upstream Group')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder={t(
+                                              'e.g., default, vip, premium'
+                                            )}
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Fetch ratios from upstream and match this group to update the ratio field.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+
+                                  <FormField
+                                    control={form.control}
+                                    name='upstream_group_ratio'
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>
+                                          {t('Upstream Group Ratio')}
+                                        </FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type='number'
+                                            step='0.01'
+                                            placeholder='0'
+                                            {...field}
+                                            onChange={(e) =>
+                                              field.onChange(
+                                                e.target.value === ''
+                                                  ? 0
+                                                  : Number(e.target.value)
+                                              )
+                                            }
+                                          />
+                                        </FormControl>
+                                        <FormDescription>
+                                          {t(
+                                            'Cost multiplier for this upstream group.'
+                                          )}
+                                        </FormDescription>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                </div>
+
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_topup_ratio'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Upstream Top-up Ratio')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='number'
+                                          step='0.01'
+                                          placeholder='1'
+                                          {...field}
+                                          onChange={(e) =>
+                                            field.onChange(
+                                              e.target.value === ''
+                                                ? 0
+                                                : Number(e.target.value)
+                                            )
+                                          }
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t(
+                                          'How many USD-equivalent upstream credits 1 CNY buys. Empty or 0 means 1.'
+                                        )}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name='upstream_group_ratios'
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Upstream Group Ratios')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Textarea
+                                          rows={6}
+                                          placeholder={t(
+                                            'Paste fetched upstream ratios JSON here'
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormDescription>
+                                        {t(
+                                          'Raw upstream ratios JSON snapshot used for matching and sync.'
+                                        )}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
 
                               {currentType === 57 && (
                                 <div className='border-border/60 flex flex-col gap-3 border-y py-4'>

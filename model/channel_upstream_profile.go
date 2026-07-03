@@ -139,14 +139,46 @@ func primaryChannelKey(raw string) string {
 
 func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 	topupRatio := normalizeUpstreamTopupRatio(profile.UpstreamTopupRatio)
+	upstreamAccount := profile.UpstreamAccount
+	upstreamLoginURL := profile.UpstreamLoginUrl
+	upstreamAuthType := profile.UpstreamAuthType
+	upstreamAccessTokenExpiresAt := profile.UpstreamAccessTokenExpiresAt
+	upstreamAuthRefreshedAt := profile.UpstreamAuthRefreshedAt
+	upstreamAuthRefreshError := profile.UpstreamAuthRefreshError
+	sessionConfigured := profile.UpstreamAccessTokenEnc != "" || profile.UpstreamRefreshTokenEnc != ""
+	passwordConfigured := profile.UpstreamPasswordEnc != ""
+
+	if identity, err := profile.ResolveIdentity(); err == nil && identity != nil {
+		if strings.TrimSpace(identity.Account) != "" {
+			upstreamAccount = identity.Account
+		}
+		if strings.TrimSpace(identity.BaseURL) != "" {
+			upstreamLoginURL = identity.BaseURL
+		}
+		if strings.TrimSpace(identity.AuthType) != "" {
+			upstreamAuthType = identity.AuthType
+		}
+		if identity.AccessTokenExpiresAt > 0 {
+			upstreamAccessTokenExpiresAt = identity.AccessTokenExpiresAt
+		}
+		if identity.AuthRefreshedAt > 0 {
+			upstreamAuthRefreshedAt = identity.AuthRefreshedAt
+		}
+		if strings.TrimSpace(identity.AuthRefreshError) != "" {
+			upstreamAuthRefreshError = identity.AuthRefreshError
+		}
+		sessionConfigured = identity.AccessTokenEnc != "" || identity.RefreshTokenEnc != ""
+		passwordConfigured = identity.PasswordEnc != ""
+	}
+
 	return ChannelUpstreamProfileSummary{
 		Id:                           profile.Id,
 		ChannelId:                    profile.ChannelId,
 		KeyFingerprint:               profile.KeyFingerprint,
 		KeyMasked:                    profile.KeyMasked,
 		KeyLabel:                     profile.KeyLabel,
-		UpstreamAccount:              profile.UpstreamAccount,
-		UpstreamLoginUrl:             profile.UpstreamLoginUrl,
+		UpstreamAccount:              upstreamAccount,
+		UpstreamLoginUrl:             upstreamLoginURL,
 		UpstreamGroup:                profile.UpstreamGroup,
 		UpstreamGroupRatio:           profile.UpstreamGroupRatio,
 		UpstreamTopupRatio:           topupRatio,
@@ -161,18 +193,18 @@ func (profile *ChannelUpstreamProfile) Summary() ChannelUpstreamProfileSummary {
 		AutoPriorityReason:           profile.AutoPriorityReason,
 		InsufficientBalanceKeywords:  profile.InsufficientBalanceKeywords,
 		NotifyEnabled:                profile.NotifyEnabled,
-		PasswordConfigured:           profile.UpstreamPasswordEnc != "",
+		PasswordConfigured:           passwordConfigured,
 		LastInsufficientAt:           profile.LastInsufficientAt,
 		LastInsufficientReason:       profile.LastInsufficientReason,
 		LastNotifiedAt:               profile.LastNotifiedAt,
 		NotifySuppressUntil:          profile.NotifySuppressUntil,
 		CreatedAt:                    profile.CreatedAt,
 		UpdatedAt:                    profile.UpdatedAt,
-		UpstreamAuthType:             profile.UpstreamAuthType,
-		UpstreamAccessTokenExpiresAt: profile.UpstreamAccessTokenExpiresAt,
-		UpstreamAuthRefreshedAt:      profile.UpstreamAuthRefreshedAt,
-		UpstreamAuthRefreshError:     profile.UpstreamAuthRefreshError,
-		SessionConfigured:            profile.UpstreamAccessTokenEnc != "" || profile.UpstreamRefreshTokenEnc != "",
+		UpstreamAuthType:             upstreamAuthType,
+		UpstreamAccessTokenExpiresAt: upstreamAccessTokenExpiresAt,
+		UpstreamAuthRefreshedAt:      upstreamAuthRefreshedAt,
+		UpstreamAuthRefreshError:     upstreamAuthRefreshError,
+		SessionConfigured:            sessionConfigured,
 	}
 }
 
@@ -431,6 +463,13 @@ func GetChannelUpstreamProfilesByChannelIds(channelIds []int) (map[int]ChannelUp
 	}
 	var profiles []ChannelUpstreamProfile
 	if err := DB.Where("channel_id IN ?", channelIds).Find(&profiles).Error; err != nil {
+		return nil, err
+	}
+	profilePointers := make([]*ChannelUpstreamProfile, 0, len(profiles))
+	for i := range profiles {
+		profilePointers = append(profilePointers, &profiles[i])
+	}
+	if err := PreloadUpstreamIdentities(profilePointers); err != nil {
 		return nil, err
 	}
 	for i := range profiles {
