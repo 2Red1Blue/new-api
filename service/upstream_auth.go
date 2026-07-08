@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
 const tokenRefreshMarginSeconds = 120
@@ -53,9 +55,9 @@ func EnsureUpstreamAccessToken(ctx context.Context, client *http.Client, identit
 
 	now := common.GetTimestamp()
 
-	// access token 仍然有效
+	// access token 仍然有效，并且能覆盖到下一次定时扫描。
 	if identity.AccessTokenExpiresAt > 0 &&
-		now+tokenRefreshMarginSeconds < identity.AccessTokenExpiresAt {
+		now+upstreamTokenRefreshLeadSeconds() < identity.AccessTokenExpiresAt {
 		accessToken, decErr := DecryptUpstreamPassword(identity.AccessTokenEnc)
 		if decErr != nil {
 			return "", fmt.Errorf("decrypt access token failed: %w", decErr)
@@ -71,6 +73,17 @@ func EnsureUpstreamAccessToken(ctx context.Context, client *http.Client, identit
 		return "", fmt.Errorf("reload identity failed: %w", err)
 	}
 	identity = latestIdentity
+
+	if identity.AccessTokenExpiresAt > 0 &&
+		now+upstreamTokenRefreshLeadSeconds() < identity.AccessTokenExpiresAt {
+		accessToken, decErr := DecryptUpstreamPassword(identity.AccessTokenEnc)
+		if decErr != nil {
+			return "", fmt.Errorf("decrypt access token failed: %w", decErr)
+		}
+		if strings.TrimSpace(accessToken) != "" {
+			return accessToken, nil
+		}
+	}
 
 	refreshToken, decErr := DecryptUpstreamPassword(identity.RefreshTokenEnc)
 	if decErr != nil {
@@ -138,6 +151,23 @@ func EnsureUpstreamAccessToken(ctx context.Context, client *http.Client, identit
 	}
 
 	return newAccessToken, nil
+}
+
+func upstreamTokenRefreshLeadSeconds() int64 {
+	lead := int64(tokenRefreshMarginSeconds)
+	setting := operation_setting.GetMonitorSetting()
+	if !setting.AutoPriorityScanEnabled {
+		return lead
+	}
+	interval := normalizeAutoPriorityScanInterval(setting.AutoPriorityScanIntervalHours)
+	if interval <= 0 {
+		return lead
+	}
+	intervalLead := int64(interval/time.Second) + tokenRefreshMarginSeconds
+	if intervalLead > lead {
+		return intervalLead
+	}
+	return lead
 }
 
 // sub2apiRefreshTokens 调用上游 /api/v1/auth/refresh 刷新 token。

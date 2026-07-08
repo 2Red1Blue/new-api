@@ -315,11 +315,10 @@ func FetchChannelUpstreamGroupRatios(c *gin.Context) {
 		return
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
-
 	// 优先使用 profile-aware 会话凭据（access_token / refresh_token 模式）
 	profile, profileErr := model.GetChannelUpstreamProfileByChannelId(channel.Id)
 	if profileErr == nil && profile != nil {
+		baseURL := resolveUpstreamGroupRatioBaseURL(channel, profile)
 		if identity, err := profile.ResolveIdentity(); err == nil && identity != nil && identity.HasSessionAuth() {
 			fetchAndWriteUpstreamGroupRatiosFromProfile(c, baseURL, profile)
 			return
@@ -331,8 +330,26 @@ func FetchChannelUpstreamGroupRatios(c *gin.Context) {
 		}
 	}
 
+	baseURL := strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
 	credential, credentialErr := upstreamCredentialFromProfile(channel.Id)
 	fetchAndWriteUpstreamGroupRatios(c, baseURL, credential, credentialErr)
+}
+
+func resolveUpstreamGroupRatioBaseURL(channel *model.Channel, profile *model.ChannelUpstreamProfile) string {
+	if profile != nil {
+		if identity, err := profile.ResolveIdentity(); err == nil && identity != nil {
+			if baseURL := strings.TrimRight(strings.TrimSpace(identity.BaseURL), "/"); baseURL != "" {
+				return baseURL
+			}
+		}
+		if baseURL := strings.TrimRight(strings.TrimSpace(profile.UpstreamLoginUrl), "/"); baseURL != "" {
+			return baseURL
+		}
+	}
+	if channel == nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(channel.GetBaseURL()), "/")
 }
 
 // fetchAndWriteUpstreamGroupRatiosFromProfile 通过 profile-aware 入口获取分组倍率并写入响应

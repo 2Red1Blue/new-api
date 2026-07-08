@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,7 @@ func setupUpstreamGroupRatioSyncTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUpstreamProfile{}, &model.Task{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUpstreamProfile{}, &model.UpstreamIdentity{}, &model.Task{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -274,6 +275,158 @@ func TestSyncChannelUpstreamGroupRatioKeepsExistingTopupRatio(t *testing.T) {
 	require.NoError(t, model.DB.First(&savedProfile, profile.Id).Error)
 	require.Equal(t, 0.5, savedProfile.UpstreamGroupRatio)
 	require.Equal(t, 2.0, savedProfile.UpstreamTopupRatio)
+}
+
+func TestEnsureUpstreamAccessTokenRefreshesBeforeScheduledScanGap(t *testing.T) {
+	setupUpstreamGroupRatioSyncTestDB(t)
+
+	origSecret := common.UpstreamSecretKey
+	common.UpstreamSecretKey = "test-upstream-secret"
+	t.Cleanup(func() {
+		common.UpstreamSecretKey = origSecret
+	})
+
+	monitorSetting := operation_setting.GetMonitorSetting()
+	originalEnabled := monitorSetting.AutoPriorityScanEnabled
+	originalInterval := monitorSetting.AutoPriorityScanIntervalHours
+	monitorSetting.AutoPriorityScanEnabled = true
+	monitorSetting.AutoPriorityScanIntervalHours = 3
+	t.Cleanup(func() {
+		monitorSetting.AutoPriorityScanEnabled = originalEnabled
+		monitorSetting.AutoPriorityScanIntervalHours = originalInterval
+	})
+
+	refreshCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/auth/refresh", r.URL.Path)
+		refreshCalled = true
+
+		var payload map[string]string
+		require.NoError(t, common.DecodeJson(r.Body, &payload))
+		assert.Equal(t, "old-refresh-token", payload["refresh_token"])
+		_, _ = w.Write([]byte(`{"data":{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":86400}}`))
+	}))
+	defer server.Close()
+
+	oldAccessEnc, err := EncryptUpstreamPassword("old-access-token")
+	require.NoError(t, err)
+	oldRefreshEnc, err := EncryptUpstreamPassword("old-refresh-token")
+	require.NoError(t, err)
+
+	now := common.GetTimestamp()
+	identity := &model.UpstreamIdentity{
+		IdentityFingerprint:  model.UpstreamIdentityFingerprint(server.URL, "upstream@example.com"),
+		Account:              "upstream@example.com",
+		BaseURL:              server.URL,
+		AuthType:             model.AuthTypeSub2APIRefreshToken,
+		AccessTokenEnc:       oldAccessEnc,
+		RefreshTokenEnc:      oldRefreshEnc,
+		AccessTokenExpiresAt: now + 3*3600 + tokenRefreshMarginSeconds,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	require.NoError(t, model.DB.Create(identity).Error)
+
+	accessToken, err := EnsureUpstreamAccessToken(context.Background(), server.Client(), identity)
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", accessToken)
+	assert.True(t, refreshCalled)
+
+	var savedIdentity model.UpstreamIdentity
+	require.NoError(t, model.DB.First(&savedIdentity, identity.Id).Error)
+	refreshToken, err := DecryptUpstreamPassword(savedIdentity.RefreshTokenEnc)
+	require.NoError(t, err)
+	assert.Equal(t, "new-refresh-token", refreshToken)
+	assert.Empty(t, savedIdentity.AuthRefreshError)
+	assert.Greater(t, savedIdentity.AccessTokenExpiresAt, now+23*3600)
+}
+
+func TestSyncAllChannelUpstreamGroupRatiosIncludesIdentityOnlyProfile(t *testing.T) {
+	setupUpstreamGroupRatioSyncTestDB(t)
+
+	origSecret := common.UpstreamSecretKey
+	common.UpstreamSecretKey = "test-upstream-secret"
+	t.Cleanup(func() {
+		common.UpstreamSecretKey = origSecret
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			var payload map[string]string
+			require.NoError(t, common.DecodeJson(r.Body, &payload))
+			assert.Equal(t, "old-refresh-token", payload["refresh_token"])
+			_, _ = w.Write([]byte(`{"data":{"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":3600}}`))
+		case "/api/v1/groups/available":
+			if r.Header.Get("Authorization") != "Bearer new-access-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"name":"vip","rate_multiplier":0.7,"status":"active"}]}`))
+		case "/api/status":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"success":false,"message":"not found"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	oldAccessEnc, err := EncryptUpstreamPassword("old-access-token")
+	require.NoError(t, err)
+	oldRefreshEnc, err := EncryptUpstreamPassword("old-refresh-token")
+	require.NoError(t, err)
+
+	identity := &model.UpstreamIdentity{
+		IdentityFingerprint:  model.UpstreamIdentityFingerprint(server.URL, "upstream@example.com"),
+		Account:              "upstream@example.com",
+		BaseURL:              server.URL,
+		AuthType:             model.AuthTypeSub2APIRefreshToken,
+		AccessTokenEnc:       oldAccessEnc,
+		RefreshTokenEnc:      oldRefreshEnc,
+		AccessTokenExpiresAt: common.GetTimestamp() - 1,
+		CreatedAt:            common.GetTimestamp(),
+		UpdatedAt:            common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(identity).Error)
+
+	channel := &model.Channel{
+		Id:     505,
+		Name:   "identity-only-sync-channel",
+		Key:    "sk-test",
+		Status: common.ChannelStatusEnabled,
+	}
+	require.NoError(t, model.DB.Create(channel).Error)
+
+	profile := &model.ChannelUpstreamProfile{
+		ChannelId:          channel.Id,
+		KeyFingerprint:     "identity-only-profile",
+		KeyMasked:          "sk-t...test",
+		UpstreamGroup:      "vip",
+		UpstreamTopupRatio: 1,
+		UpstreamIdentityId: &identity.Id,
+		CreatedAt:          common.GetTimestamp(),
+		UpdatedAt:          common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(profile).Error)
+
+	synced, failed, err := SyncAllChannelUpstreamGroupRatios(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, synced)
+	assert.Equal(t, 0, failed)
+
+	var savedProfile model.ChannelUpstreamProfile
+	require.NoError(t, model.DB.First(&savedProfile, profile.Id).Error)
+	assert.Equal(t, 0.7, savedProfile.UpstreamGroupRatio)
+
+	var savedIdentity model.UpstreamIdentity
+	require.NoError(t, model.DB.First(&savedIdentity, identity.Id).Error)
+	refreshToken, err := DecryptUpstreamPassword(savedIdentity.RefreshTokenEnc)
+	require.NoError(t, err)
+	assert.Equal(t, "new-refresh-token", refreshToken)
+	assert.Empty(t, savedIdentity.AuthRefreshError)
+	assert.Greater(t, savedIdentity.AccessTokenExpiresAt, common.GetTimestamp())
 }
 
 func TestSyncAllChannelUpstreamGroupRatiosStoresLatestTaskPerProfile(t *testing.T) {

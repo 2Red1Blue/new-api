@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 import { CHANNEL_STATUS } from '../constants'
 import {
   getUpstreamEffectiveRatio,
+  getUpstreamGroupRatio,
   isTagAggregateRow,
   parseGroupsList,
 } from '../lib'
@@ -78,8 +79,14 @@ function ChannelCardComponent({
 
   const groups = parseGroupsList(row.original.group ?? '')
   const upstreamProfile = row.original.upstream_profile
-  const upstreamGroupRatio = upstreamProfile?.upstream_group_ratio ?? 0
+  const upstreamAccount = upstreamProfile?.upstream_account.trim() ?? ''
+  const upstreamGroupRatio = getUpstreamGroupRatio(upstreamProfile)
   const effectiveRatio = getUpstreamEffectiveRatio(upstreamProfile)
+  const accountPreview =
+    upstreamAccount.length > 18
+      ? `${upstreamAccount.slice(0, 8)}...${upstreamAccount.slice(-6)}`
+      : upstreamAccount
+  const showUpstreamAccount = !isTagRow && upstreamAccount.length > 0
   const showUpstreamGroupRatio = !isTagRow && upstreamGroupRatio > 0
   const showEffectiveRatio = !isTagRow && effectiveRatio > 0
 
@@ -188,8 +195,29 @@ function ChannelCardComponent({
           ) : (
             <span className='text-muted-foreground text-sm'>-</span>
           )}
-          {(showUpstreamGroupRatio || showEffectiveRatio) && (
+          {(showUpstreamAccount || showUpstreamGroupRatio || showEffectiveRatio) && (
             <div className='-ml-1.5 flex flex-wrap gap-1'>
+              {showUpstreamAccount && (
+                <TooltipProvider delay={100}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <StatusBadge
+                          label={sensitiveVisible ? accountPreview : SENSITIVE_MASK}
+                          variant='blue'
+                          size='sm'
+                          copyable={false}
+                          showDot={false}
+                          className='max-w-[180px] font-mono'
+                        />
+                      }
+                    />
+                    <TooltipContent side='top'>
+                      {t('Upstream Account')}: {sensitiveVisible ? upstreamAccount : SENSITIVE_MASK}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
               {showUpstreamGroupRatio && (
                 <TooltipProvider delay={100}>
                   <Tooltip>

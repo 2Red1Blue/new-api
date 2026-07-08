@@ -142,7 +142,7 @@ func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUp
 		Update("settings", channel.OtherSettings).Error
 }
 
-// SyncAllChannelUpstreamGroupRatios 批量拉取所有配置了上游登录地址的渠道分组倍率并写入数据库
+// SyncAllChannelUpstreamGroupRatios 批量拉取所有配置了上游地址的渠道分组倍率并写入数据库
 // 返回：已同步数量、失败数量、首个致命错误
 func SyncAllChannelUpstreamGroupRatios(ctx context.Context, batchSize int) (synced int, failed int, err error) {
 	if batchSize <= 0 {
@@ -152,7 +152,7 @@ func SyncAllChannelUpstreamGroupRatios(ctx context.Context, batchSize int) (sync
 	for {
 		var profiles []model.ChannelUpstreamProfile
 		if err = model.DB.
-			Where("id > ? AND upstream_login_url != ''", lastID).
+			Where("id > ? AND (upstream_login_url != '' OR upstream_identity_id IS NOT NULL)", lastID).
 			Order("id ASC").
 			Limit(batchSize).
 			Find(&profiles).Error; err != nil {

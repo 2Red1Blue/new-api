@@ -358,6 +358,80 @@ export function getBalanceVariant(
   return 'success'
 }
 
+type UpstreamGroupSnapshotEntry = {
+  rate_multiplier?: number
+}
+
+function normalizeUpstreamTopupRatio(topupRatio: number): number {
+  if (topupRatio <= 0) {
+    return 1
+  }
+  return topupRatio
+}
+
+function parseUpstreamGroupRatios(
+  raw: string
+): Record<string, number> | null {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== 'object') {
+      return null
+    }
+
+    const ratios: Record<string, number> = {}
+    for (const [group, value] of Object.entries(parsed)) {
+      if (typeof value === 'number' && value > 0) {
+        ratios[group] = value
+        continue
+      }
+
+      if (!value || typeof value !== 'object') {
+        continue
+      }
+
+      const entry = value as UpstreamGroupSnapshotEntry
+      if (
+        typeof entry.rate_multiplier === 'number' &&
+        entry.rate_multiplier > 0
+      ) {
+        ratios[group] = entry.rate_multiplier
+      }
+    }
+
+    return Object.keys(ratios).length > 0 ? ratios : null
+  } catch {
+    return null
+  }
+}
+
+export function getUpstreamGroupRatio(
+  profile: ChannelUpstreamProfile | null | undefined
+): number {
+  if (!profile) {
+    return 0
+  }
+  if (profile.upstream_group_ratio > 0) {
+    return profile.upstream_group_ratio
+  }
+
+  const upstreamGroup = profile.upstream_group.trim()
+  if (!upstreamGroup) {
+    return 0
+  }
+
+  const ratios = parseUpstreamGroupRatios(profile.upstream_group_ratios)
+  if (!ratios) {
+    return 0
+  }
+
+  return ratios[upstreamGroup] ?? 0
+}
+
 /**
  * Return the effective upstream ratio after normalizing the top-up ratio.
  * Prefer the backend summary field and fall back to the raw ratio calculation.
@@ -371,8 +445,9 @@ export function getUpstreamEffectiveRatio(
   if (profile.upstream_effective_ratio > 0) {
     return profile.upstream_effective_ratio
   }
-  if (profile.upstream_group_ratio > 0 && profile.upstream_topup_ratio > 0) {
-    return profile.upstream_group_ratio / profile.upstream_topup_ratio
+  const groupRatio = getUpstreamGroupRatio(profile)
+  if (groupRatio > 0) {
+    return groupRatio / normalizeUpstreamTopupRatio(profile.upstream_topup_ratio)
   }
   return 0
 }

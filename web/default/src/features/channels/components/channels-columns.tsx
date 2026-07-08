@@ -63,6 +63,7 @@ import {
   getChannelTypeIcon,
   getChannelTypeLabel,
   getUpstreamEffectiveRatio,
+  getUpstreamGroupRatio,
   getResponseTimeConfig,
   isMultiKeyChannel,
   parseModelsList,
@@ -514,8 +515,15 @@ function ChannelGroupsCell({ channel }: { channel: Channel }) {
   const { sensitiveVisible } = useChannels()
   const groupArray = parseGroupsList(channel.group)
   const upstreamProfile = channel.upstream_profile
-  const upstreamGroupRatio = upstreamProfile?.upstream_group_ratio ?? 0
+  const upstreamAccount = upstreamProfile?.upstream_account.trim() ?? ''
+  const upstreamGroupRatio = getUpstreamGroupRatio(upstreamProfile)
   const effectiveRatio = getUpstreamEffectiveRatio(upstreamProfile)
+  const accountPreview =
+    upstreamAccount.length > 18
+      ? `${upstreamAccount.slice(0, 8)}...${upstreamAccount.slice(-6)}`
+      : upstreamAccount
+  const showUpstreamAccount =
+    !isTagAggregateRow(channel) && upstreamAccount.length > 0
   const showUpstreamGroupRatio =
     !isTagAggregateRow(channel) && upstreamGroupRatio > 0
   const showEffectiveRatio = !isTagAggregateRow(channel) && effectiveRatio > 0
@@ -532,8 +540,32 @@ function ChannelGroupsCell({ channel }: { channel: Channel }) {
           />
         ))}
       />
-      {(showUpstreamGroupRatio || showEffectiveRatio) && (
+      {(showUpstreamAccount || showUpstreamGroupRatio || showEffectiveRatio) && (
         <div className='-ml-1.5 flex flex-wrap gap-1'>
+          {showUpstreamAccount && (
+            <TooltipProvider delay={100}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <StatusBadge
+                      label={
+                        sensitiveVisible ? accountPreview : SENSITIVE_MASK
+                      }
+                      variant='blue'
+                      size='sm'
+                      copyable={false}
+                      showDot={false}
+                      className='max-w-[180px] font-mono'
+                    />
+                  }
+                />
+                <TooltipContent side='top'>
+                  {t('Upstream Account')}:{' '}
+                  {sensitiveVisible ? upstreamAccount : SENSITIVE_MASK}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           {showUpstreamGroupRatio && (
             <TooltipProvider delay={100}>
               <Tooltip>
