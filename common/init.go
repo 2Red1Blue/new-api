@@ -62,6 +62,9 @@ func InitEnv() {
 		CryptoSecret = SessionSecret
 	}
 	UpstreamSecretKey = os.Getenv("UPSTREAM_SECRET_KEY")
+	if err := InitSessionCookieSettings(); err != nil {
+		log.Fatal(err)
+	}
 	if os.Getenv("SQLITE_PATH") != "" {
 		SQLitePath = os.Getenv("SQLITE_PATH")
 	}

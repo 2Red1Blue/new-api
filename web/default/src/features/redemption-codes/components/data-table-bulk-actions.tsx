@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { type Table } from '@tanstack/react-table'
 import { Trash2 } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
