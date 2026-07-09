@@ -273,6 +273,30 @@ func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, e
 	return headers, nil
 }
 
+func buildFetchModelsURL(channelType int, baseURL string) string {
+	switch channelType {
+	case constant.ChannelTypeAli:
+		return fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
+	case constant.ChannelTypeZhipu_v4:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			return fmt.Sprintf("%s/models", plan.OpenAIBaseURL)
+		}
+		return fmt.Sprintf("%s/api/paas/v4/models", baseURL)
+	case constant.ChannelTypeVolcEngine:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			return fmt.Sprintf("%s/v1/models", plan.OpenAIBaseURL)
+		}
+		return fmt.Sprintf("%s/v1/models", baseURL)
+	case constant.ChannelTypeMoonshot:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			return fmt.Sprintf("%s/models", plan.OpenAIBaseURL)
+		}
+		return fmt.Sprintf("%s/v1/models", baseURL)
+	default:
+		return fmt.Sprintf("%s/v1/models", baseURL)
+	}
+}
+
 func FetchUpstreamModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -465,10 +489,51 @@ func upstreamCredentialFromProfile(channelId int) (*service.UpstreamPricingCrede
 
 // SetChannelUpstreamAuthSessionRequest 上游会话凭据写入请求
 type SetChannelUpstreamAuthSessionRequest struct {
-	AuthType     string `json:"auth_type"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
+	AuthType       string `json:"auth_type"`
+	AccessToken    string `json:"access_token"`
+	AuthToken      string `json:"auth_token"`
+	ShortAccess    string `json:"at"`
+	RefreshToken   string `json:"refresh_token"`
+	ShortRefresh   string `json:"rt"`
+	ExpiresIn      int64  `json:"expires_in"`
+	ExpiresAt      int64  `json:"expires_at"`
+	TokenExpiresAt int64  `json:"token_expires_at"`
+}
+
+func (req *SetChannelUpstreamAuthSessionRequest) normalize(now int64) {
+	req.AuthType = strings.TrimSpace(req.AuthType)
+	req.AccessToken = strings.TrimSpace(req.AccessToken)
+	if req.AccessToken == "" {
+		req.AccessToken = strings.TrimSpace(req.AuthToken)
+	}
+	if req.AccessToken == "" {
+		req.AccessToken = strings.TrimSpace(req.ShortAccess)
+	}
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+	if req.RefreshToken == "" {
+		req.RefreshToken = strings.TrimSpace(req.ShortRefresh)
+	}
+
+	if req.AuthType == "" {
+		if req.RefreshToken != "" {
+			req.AuthType = model.AuthTypeSub2APIRefreshToken
+		} else if req.AccessToken != "" {
+			req.AuthType = model.AuthTypeSub2APIAccessToken
+		}
+	}
+
+	if req.ExpiresIn <= 0 {
+		expiresAt := req.TokenExpiresAt
+		if expiresAt <= 0 {
+			expiresAt = req.ExpiresAt
+		}
+		if expiresAt > 1_000_000_000_000 {
+			expiresAt /= 1000
+		}
+		if expiresAt > now {
+			req.ExpiresIn = expiresAt - now
+		}
+	}
 }
 
 // SetChannelUpstreamAuthSession 设置渠道的上游会话凭据（access_token + refresh_token）。
@@ -486,9 +551,8 @@ func SetChannelUpstreamAuthSession(c *gin.Context) {
 		return
 	}
 
-	req.AuthType = strings.TrimSpace(req.AuthType)
-	req.AccessToken = strings.TrimSpace(req.AccessToken)
-	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
+	now := common.GetTimestamp()
+	req.normalize(now)
 
 	if req.AuthType == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "auth_type 不能为空"})
@@ -536,7 +600,6 @@ func SetChannelUpstreamAuthSession(c *gin.Context) {
 	}
 
 	// 如果 profile 未绑定 identity，补绑定
-	now := common.GetTimestamp()
 	if profile.UpstreamIdentityId == nil || *profile.UpstreamIdentityId != identity.Id {
 		profile.UpstreamIdentityId = &identity.Id
 		profile.UpstreamIdentity = identity
@@ -1724,7 +1787,7 @@ func FetchModels(c *gin.Context) {
 	}
 
 	client := &http.Client{}
-	url := fmt.Sprintf("%s/v1/models", baseURL)
+	url := buildFetchModelsURL(req.Type, baseURL)
 
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -1768,7 +1831,7 @@ func FetchModels(c *gin.Context) {
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+	if err := common.DecodeJson(response.Body, &result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),

@@ -204,3 +204,32 @@ func TestFetchChannelUpstreamGroupRatiosUsesIdentitySessionAuth(t *testing.T) {
 	require.Equal(t, 0.75, response.Data.GroupRatios["default"])
 	require.Equal(t, server.URL+"/api/v1/groups/available", response.Data.Source)
 }
+
+func TestSetChannelUpstreamAuthSessionRequestNormalizeAcceptsBrowserTokenNames(t *testing.T) {
+	now := int64(1_783_569_680)
+	req := SetChannelUpstreamAuthSessionRequest{
+		AuthToken:      " access-token ",
+		RefreshToken:   " refresh-token ",
+		TokenExpiresAt: (now + 3600) * 1000,
+	}
+
+	req.normalize(now)
+
+	require.Equal(t, model.AuthTypeSub2APIRefreshToken, req.AuthType)
+	require.Equal(t, "access-token", req.AccessToken)
+	require.Equal(t, "refresh-token", req.RefreshToken)
+	require.Equal(t, int64(3600), req.ExpiresIn)
+}
+
+func TestSetChannelUpstreamAuthSessionRequestNormalizeSupportsShortAliases(t *testing.T) {
+	req := SetChannelUpstreamAuthSessionRequest{
+		ShortAccess: "access-token",
+		ExpiresAt:   1_783_573_280,
+	}
+
+	req.normalize(1_783_569_680)
+
+	require.Equal(t, model.AuthTypeSub2APIAccessToken, req.AuthType)
+	require.Equal(t, "access-token", req.AccessToken)
+	require.Equal(t, int64(3600), req.ExpiresIn)
+}
