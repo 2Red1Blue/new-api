@@ -51,7 +51,6 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 		middleware.RootAuth(),
 		middleware.CriticalRateLimit(),
 		middleware.DisableCache(),
-		middleware.SecureVerificationRequired(),
 	)
 	{
 		authSessionRoute.POST("/session", controller.SetChannelUpstreamAuthSession)
