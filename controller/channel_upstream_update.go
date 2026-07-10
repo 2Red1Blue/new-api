@@ -286,6 +286,9 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 	}
 
 	url := buildFetchModelsURL(channel.Type, baseURL)
+	if ids, ok, err := fetchChannelUpstreamModelIDsWithSessionAuth(channel, url); ok || err != nil {
+		return ids, err
+	}
 
 	key, _, apiErr := channel.GetNextEnabledKey()
 	if apiErr != nil {
@@ -298,23 +301,65 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return nil, err
 	}
 
-	body, err := GetResponseBody(http.MethodGet, url, channel, headers)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
 	if err != nil {
 		return nil, err
 	}
+	return fetchOpenAICompatibleModelIDs(ctx, client, url, headers)
+}
 
-	var result OpenAIModelsResponse
-	if err := common.Unmarshal(body, &result); err != nil {
-		return nil, err
+func fetchChannelUpstreamModelIDsWithSessionAuth(channel *model.Channel, url string) ([]string, bool, error) {
+	profile, err := model.GetChannelUpstreamProfileByChannelId(channel.Id)
+	if err != nil || profile == nil {
+		return nil, false, nil
+	}
+	identity, err := profile.ResolveIdentity()
+	if err != nil || identity == nil || !identity.HasSessionAuth() {
+		return nil, false, nil
 	}
 
-	ids := lo.Map(result.Data, func(item OpenAIModel, _ int) string {
-		if channel.Type == constant.ChannelTypeGemini {
-			return strings.TrimPrefix(item.ID, "models/")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
+	if err != nil {
+		return nil, true, err
+	}
+	accessToken, err := service.EnsureUpstreamAccessToken(ctx, client, identity)
+	if err != nil {
+		return nil, true, fmt.Errorf("获取上游会话 token 失败: %w", err)
+	}
+	headers := GetAuthHeader(strings.TrimSpace(accessToken))
+	ids, err := fetchOpenAICompatibleModelIDs(ctx, client, url, headers)
+	return ids, true, err
+}
+
+func fetchOpenAICompatibleModelIDs(ctx context.Context, client *http.Client, url string, headers http.Header) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
 		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status code: %d", resp.StatusCode)
+	}
+	var result OpenAIModelsResponse
+	if err := common.DecodeJson(resp.Body, &result); err != nil {
+		return nil, err
+	}
+	ids := lo.Map(result.Data, func(item OpenAIModel, _ int) string {
 		return item.ID
 	})
-
 	return normalizeModelNames(ids), nil
 }
 

@@ -5,8 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -82,6 +85,63 @@ func TestCollectPendingApplyUpstreamModelChanges(t *testing.T) {
 
 	require.Equal(t, []string{"gpt-4o", "gpt-4.1"}, pendingAddModels)
 	require.Equal(t, []string{"old-model"}, pendingRemoveModels)
+}
+
+func TestFetchChannelUpstreamModelIDsUsesIdentitySessionAuth(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.ChannelUpstreamProfile{}, &model.UpstreamIdentity{}))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/models", r.URL.Path)
+		if r.Header.Get("Authorization") != "Bearer session-access-token" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-5.4"},{"id":" gpt-5.5 "},{"id":"gpt-5.4"}]}`))
+	}))
+	defer server.Close()
+
+	now := common.GetTimestamp()
+	channel := &model.Channel{
+		Name:        "xingyun",
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "api-key-without-model-list-access",
+		Status:      common.ChannelStatusEnabled,
+		BaseURL:     &server.URL,
+		Models:      "gpt-5.4",
+		CreatedTime: now,
+	}
+	require.NoError(t, db.Create(channel).Error)
+
+	accessEnc, err := service.EncryptUpstreamPassword("session-access-token")
+	require.NoError(t, err)
+	identity := &model.UpstreamIdentity{
+		IdentityFingerprint: model.UpstreamIdentityFingerprint(server.URL, "user@example.com"),
+		Account:             "user@example.com",
+		BaseURL:             server.URL,
+		AuthType:            model.AuthTypeSub2APIAccessToken,
+		AccessTokenEnc:      accessEnc,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	require.NoError(t, db.Create(identity).Error)
+	profile := &model.ChannelUpstreamProfile{
+		ChannelId:          channel.Id,
+		KeyFingerprint:     model.KeyFingerprint(channel.Key),
+		KeyMasked:          model.MaskKey(channel.Key),
+		UpstreamAccount:    "user@example.com",
+		UpstreamLoginUrl:   server.URL,
+		UpstreamIdentityId: &identity.Id,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	require.NoError(t, db.Create(profile).Error)
+
+	models, err := fetchChannelUpstreamModelIDs(channel)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5.4", "gpt-5.5"}, models)
 }
 
 func TestNormalizeChannelModelMapping(t *testing.T) {
