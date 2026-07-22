@@ -202,7 +202,6 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/cleanup_model_access", controller.CleanupModelAccess)
 			optionRoute.GET("/channel_auto_priority_scan/status", controller.GetChannelAutoPriorityScanStatus)
 			optionRoute.POST("/channel_auto_priority_scan/run", controller.RunChannelAutoPriorityScan)
-			optionRoute.POST("/migrate_console_setting", controller.MigrateConsoleSetting) // 用于迁移检测的旧键，下个版本会删除
 			optionRoute.GET("/waffo-pancake/catalog", controller.ListWaffoPancakeCatalog)
 			optionRoute.POST("/waffo-pancake/pair", controller.CreateWaffoPancakePair)
 			optionRoute.POST("/waffo-pancake/save", controller.SaveWaffoPancake)
