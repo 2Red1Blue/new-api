@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -102,17 +101,16 @@ func parseHeaderNavBool(value any, fallback bool) bool {
 	}
 }
 
-func isRootSession(c *gin.Context) bool {
-	session := sessions.Default(c)
-	role, ok := session.Get("role").(int)
-	return ok && role >= common.RoleRootUser
+func isRootCredential(c *gin.Context) bool {
+	user, _, _, err := classifyDashboardCredential(c)
+	return err == nil && user != nil && user.Role >= common.RoleRootUser
 }
 
 func HeaderNavModuleAuth(module string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		access := getHeaderNavAccess(module)
 		if !access.Enabled {
-			if isRootSession(c) {
+			if isRootCredential(c) {
 				c.Set("role", common.RoleRootUser)
 				c.Next()
 				return
@@ -139,7 +137,7 @@ func HeaderNavModulePublicOrUserAuth(module string) gin.HandlerFunc {
 		access := getHeaderNavAccess(module)
 		if !access.Enabled || access.RequireAuth {
 			if !access.Enabled {
-				if isRootSession(c) {
+				if isRootCredential(c) {
 					c.Set("role", common.RoleRootUser)
 					c.Next()
 					return
