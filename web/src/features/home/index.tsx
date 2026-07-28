@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
+import { BackgroundBeamsWithCollision } from '@/components/ui/background-beams-with-collision'
 import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
@@ -122,7 +123,9 @@ export function Home() {
 
   return (
     <PublicLayout showMainContainer={false}>
-      <Hero isAuthenticated={isAuthenticated} />
+      <BackgroundBeamsWithCollision>
+        <Hero isAuthenticated={isAuthenticated} />
+      </BackgroundBeamsWithCollision>
       <Stats />
       <Features />
       <HowItWorks />
