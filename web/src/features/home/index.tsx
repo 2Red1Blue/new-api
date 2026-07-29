@@ -28,6 +28,7 @@ import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Features, Hero, HowItWorks, Stats } from './components'
+import { HomeVortexBackground } from './components/home-vortex-background'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -124,6 +125,7 @@ export function Home() {
   return (
     <PublicLayout showMainContainer={false}>
       <BackgroundBeamsWithCollision>
+        <HomeVortexBackground />
         <Hero isAuthenticated={isAuthenticated} />
       </BackgroundBeamsWithCollision>
       <Stats />

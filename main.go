@@ -42,8 +42,20 @@ import (
 //go:embed web/dist
 var buildFS embed.FS
 
-//go:embed web/dist/index.html
-var indexPage []byte
+var indexPage = loadEmbeddedIndexPage()
+
+func loadEmbeddedIndexPage() []byte {
+	indexPage, err := buildFS.ReadFile("web/dist/index.html")
+	if err == nil {
+		return indexPage
+	}
+
+	fallbackPage, fallbackErr := buildFS.ReadFile("web/dist/embed-placeholder.html")
+	if fallbackErr != nil {
+		panic(fmt.Sprintf("failed to load embedded frontend index: %v; fallback: %v", err, fallbackErr))
+	}
+	return fallbackPage
+}
 
 func main() {
 	startTime := time.Now()

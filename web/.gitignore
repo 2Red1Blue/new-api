@@ -25,3 +25,8 @@ dist-ssr
 *.sln
 *.sw?
 .tanstack/*
+
+# Keep the Go embed fallback; Rsbuild copies the source from public/ on every build.
+!/dist/
+/dist/*
+!/dist/embed-placeholder.html

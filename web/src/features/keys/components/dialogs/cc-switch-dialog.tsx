@@ -92,6 +92,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   tokenKey: string
+  tokenGroup: string
 }
 
 export function CCSwitchDialog(props: Props) {
@@ -101,8 +102,8 @@ export function CCSwitchDialog(props: Props) {
   const [models, setModels] = useState<Record<string, string>>({})
 
   const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch'],
-    queryFn: getUserModels,
+    queryKey: ['user-models-ccswitch', props.tokenGroup],
+    queryFn: () => getUserModels(props.tokenGroup),
     enabled: props.open,
     staleTime: 5 * 60 * 1000,
   })
@@ -111,6 +112,15 @@ export function CCSwitchDialog(props: Props) {
     const items = modelsData?.data ?? []
     return items.map((m) => ({ value: m, label: m }))
   }, [modelsData?.data])
+
+  const defaultCodexModel = useMemo(
+    () =>
+      app === 'codex' &&
+      modelOptions.some((option) => option.value === 'gpt-5.6-terra')
+        ? 'gpt-5.6-terra'
+        : '',
+    [app, modelOptions]
+  )
 
   useEffect(() => {
     if (props.open) {
@@ -123,13 +133,25 @@ export function CCSwitchDialog(props: Props) {
     }
   }, [props.open])
 
+  useEffect(() => {
+    if (!props.open || !defaultCodexModel || models.model) return
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setModels((prev) => ({ ...prev, model: defaultCodexModel }))
+  }, [defaultCodexModel, models.model, props.open])
+
   const currentConfig = APP_CONFIGS[app]
 
   const handleAppChange = (val: string) => {
     const appVal = val as AppType
     setApp(appVal)
     setName(APP_CONFIGS[appVal].defaultName)
-    setModels({})
+    setModels(
+      appVal === 'codex' &&
+        modelOptions.some((option) => option.value === 'gpt-5.6-terra')
+        ? { model: 'gpt-5.6-terra' }
+        : {}
+    )
   }
 
   const handleSubmit = () => {

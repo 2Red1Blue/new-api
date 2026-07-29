@@ -30,6 +30,7 @@ import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
 import { TransferDialog } from './components/dialogs/transfer-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
+import { RedemptionCodeShopCard } from './components/redemption-code-shop-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE, PAYMENT_TYPES } from './constants'
@@ -297,7 +298,7 @@ export function Wallet(props: WalletProps) {
                   : 'grid gap-4'
               }
             >
-              <div id='wallet-add-funds' className='scroll-mt-4'>
+              <div id='wallet-add-funds' className='scroll-mt-4 space-y-4'>
                 <RechargeFormCard
                   topupInfo={topupInfo}
                   presetAmounts={presetAmounts}
@@ -329,6 +330,7 @@ export function Wallet(props: WalletProps) {
                     topupInfo?.enable_waffo_pancake_topup
                   }
                 />
+                <RedemptionCodeShopCard />
               </div>
 
               <SubscriptionPlansCard

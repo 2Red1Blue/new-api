@@ -9,6 +9,9 @@ function stableStringify(obj) {
 
 const newKeys = {
   "en": {
+    "Buy a redemption code here, then redeem it above.": "Buy a redemption code here, then redeem it above.",
+    "Open in new window": "Open in new window",
+    "Redemption Code Shop": "Redemption Code Shop",
     "Cost multiplier for this upstream group.": "Cost multiplier for this upstream group.",
     "Current password": "Current password",
     "Fetch ratios from upstream and match this group to update the ratio field.": "Fetch ratios from upstream and match this group to update the ratio field.",
@@ -34,6 +37,9 @@ const newKeys = {
     "Verification scope is missing": "Verification scope is missing"
   },
   "zh": {
+    "Buy a redemption code here, then redeem it above.": "在这里购买兑换码，然后在上方进行兑换。",
+    "Open in new window": "在新窗口打开",
+    "Redemption Code Shop": "兑换码商城",
     "Cost multiplier for this upstream group.": "该上游分组的成本倍率。",
     "Current password": "当前密码",
     "Fetch ratios from upstream and match this group to update the ratio field.": "从上游拉取倍率，并按此分组匹配后更新倍率字段。",
@@ -59,6 +65,9 @@ const newKeys = {
     "Verification scope is missing": "缺少验证范围"
   },
   "fr": {
+    "Buy a redemption code here, then redeem it above.": "Achetez un code de recharge ici, puis utilisez-le ci-dessus.",
+    "Open in new window": "Ouvrir dans une nouvelle fenêtre",
+    "Redemption Code Shop": "Boutique de codes de recharge",
     "Cost multiplier for this upstream group.": "Multiplicateur de coût pour ce groupe upstream.",
     "Current password": "Mot de passe actuel",
     "Fetch ratios from upstream and match this group to update the ratio field.": "Récupérez les ratios depuis l’upstream et faites correspondre ce groupe pour mettre à jour le champ du ratio.",
@@ -84,6 +93,9 @@ const newKeys = {
     "Verification scope is missing": "La portée de vérification est manquante"
   },
   "ja": {
+    "Buy a redemption code here, then redeem it above.": "ここで引き換えコードを購入し、上の欄で使用してください。",
+    "Open in new window": "新しいウィンドウで開く",
+    "Redemption Code Shop": "引き換えコードショップ",
     "Cost multiplier for this upstream group.": "このアップストリームグループのコスト倍率です。",
     "Current password": "現在のパスワード",
     "Fetch ratios from upstream and match this group to update the ratio field.": "アップストリームから倍率を取得し、このグループに一致した値で倍率欄を更新します。",
@@ -109,6 +121,9 @@ const newKeys = {
     "Verification scope is missing": "検証スコープがありません"
   },
   "ru": {
+    "Buy a redemption code here, then redeem it above.": "Купите код пополнения здесь, затем активируйте его выше.",
+    "Open in new window": "Открыть в новом окне",
+    "Redemption Code Shop": "Магазин кодов пополнения",
     "Cost multiplier for this upstream group.": "Коэффициент стоимости для этой upstream-группы.",
     "Current password": "Текущий пароль",
     "Fetch ratios from upstream and match this group to update the ratio field.": "Получите коэффициенты из upstream и сопоставьте эту группу, чтобы обновить поле коэффициента.",
@@ -134,6 +149,9 @@ const newKeys = {
     "Verification scope is missing": "Область проверки не указана"
   },
   "vi": {
+    "Buy a redemption code here, then redeem it above.": "Mua mã đổi thưởng tại đây, sau đó đổi mã ở phía trên.",
+    "Open in new window": "Mở trong cửa sổ mới",
+    "Redemption Code Shop": "Cửa hàng mã đổi thưởng",
     "Cost multiplier for this upstream group.": "Hệ số chi phí cho nhóm upstream này.",
     "Current password": "Mật khẩu hiện tại",
     "Fetch ratios from upstream and match this group to update the ratio field.": "Lấy tỷ lệ từ upstream và khớp nhóm này để cập nhật trường tỷ lệ.",
@@ -159,6 +177,9 @@ const newKeys = {
     "Verification scope is missing": "Thiếu phạm vi xác minh"
   },
   "zh-TW": {
+    "Buy a redemption code here, then redeem it above.": "在這裡購買兌換碼，然後在上方進行兌換。",
+    "Open in new window": "在新視窗開啟",
+    "Redemption Code Shop": "兌換碼商城",
     "Cost multiplier for this upstream group.": "此上游群組的成本倍率。",
     "Current password": "目前密碼",
     "Fetch ratios from upstream and match this group to update the ratio field.": "從上游取得倍率，並依此群組比對後更新倍率欄位。",
