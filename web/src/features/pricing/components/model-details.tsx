@@ -572,6 +572,7 @@ function PriceSection(props: {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice: boolean
 }) {
   const { t } = useTranslation()
@@ -584,6 +585,7 @@ function PriceSection(props: {
     showRechargePrice: props.showRechargePrice,
     priceRate: props.priceRate,
     usdExchangeRate: props.usdExchangeRate,
+    currency: props.currency,
     groupRatioMultiplier: 1,
   })
 
@@ -718,7 +720,8 @@ function PriceSection(props: {
               props.showRechargePrice,
               props.priceRate,
               props.usdExchangeRate,
-              baseGroupRatioMap
+              baseGroupRatioMap,
+              props.currency
             )}
           </span>
         </div>
@@ -737,7 +740,8 @@ function PriceSection(props: {
         props.showRechargePrice,
         props.priceRate,
         props.usdExchangeRate,
-        baseGroupRatioMap
+        baseGroupRatioMap,
+        props.currency
       )}
       <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
         / {tokenUnitLabel}
@@ -858,6 +862,7 @@ function GroupPricingSection(props: {
   priceRate: number
   usdExchangeRate: number
   tokenUnit: TokenUnit
+  currency?: PricingCurrency
   showRechargePrice?: boolean
 }) {
   const { t } = useTranslation()
@@ -946,6 +951,7 @@ function GroupPricingSection(props: {
       showRechargePrice,
       priceRate: props.priceRate,
       usdExchangeRate: props.usdExchangeRate,
+      currency: props.currency,
       groupRatioMultiplier: 1,
     })
     const formattedPricesByGroup = new Map(
@@ -958,6 +964,7 @@ function GroupPricingSection(props: {
             showRechargePrice,
             priceRate: props.priceRate,
             usdExchangeRate: props.usdExchangeRate,
+            currency: props.currency,
             groupRatioMultiplier: ratio,
           }),
         ] as const
@@ -1031,7 +1038,8 @@ function GroupPricingSection(props: {
       showRechargePrice,
       props.priceRate,
       props.usdExchangeRate,
-      props.groupRatio
+      props.groupRatio,
+      props.currency
     )
   const renderFixedGroupPrice = (group: string) =>
     formatFixedPrice(
@@ -1040,7 +1048,8 @@ function GroupPricingSection(props: {
       showRechargePrice,
       props.priceRate,
       props.usdExchangeRate,
-      props.groupRatio
+      props.groupRatio,
+      props.currency
     )
 
   return (
@@ -1178,10 +1187,15 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
+              currency={props.currency}
               showRechargePrice={showRechargePrice}
             />
             {isDynamic && (
-              <DynamicPricingBreakdown billingExpr={props.model.billing_expr} />
+              <DynamicPricingBreakdown
+                billingExpr={props.model.billing_expr}
+                currency={props.currency}
+                usdExchangeRate={props.usdExchangeRate}
+              />
             )}
             <GroupPricingSection
               model={props.model}
@@ -1191,6 +1205,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}
               tokenUnit={props.tokenUnit}
+              currency={props.currency}
               showRechargePrice={showRechargePrice}
             />
           </section>

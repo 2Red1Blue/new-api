@@ -244,11 +244,13 @@ func TestSyncChannelUpstreamGroupRatioClearsRPMWhenGroupNameEmpty(t *testing.T) 
 func TestSyncChannelUpstreamGroupRatioKeepsExistingTopupRatio(t *testing.T) {
 	setupUpstreamGroupRatioSyncTestDB(t)
 
+	statusRequestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/ratio_config":
 			_, _ = w.Write([]byte(`{"success":true,"data":{"group_ratio":{"default":0.5}}}`))
 		case "/api/status":
+			statusRequestCount++
 			_, _ = w.Write([]byte(`{"success":true,"data":{"topup_ratio":9}}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -275,6 +277,48 @@ func TestSyncChannelUpstreamGroupRatioKeepsExistingTopupRatio(t *testing.T) {
 	require.NoError(t, model.DB.First(&savedProfile, profile.Id).Error)
 	require.Equal(t, 0.5, savedProfile.UpstreamGroupRatio)
 	require.Equal(t, 2.0, savedProfile.UpstreamTopupRatio)
+	require.Equal(t, 0, statusRequestCount)
+}
+
+func TestSyncChannelUpstreamGroupRatioFillsMissingTopupRatio(t *testing.T) {
+	setupUpstreamGroupRatioSyncTestDB(t)
+
+	statusRequestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ratio_config":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"group_ratio":{"default":0.5}}}`))
+		case "/api/status":
+			statusRequestCount++
+			_, _ = w.Write([]byte(`{"success":true,"data":{"topup_ratio":9}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"success":false,"message":"not found"}`))
+		}
+	}))
+	defer server.Close()
+
+	profile := &model.ChannelUpstreamProfile{
+		ChannelId:          505,
+		KeyFingerprint:     "test-fingerprint-fill-topup",
+		KeyMasked:          "sk-t...test",
+		UpstreamLoginUrl:   server.URL,
+		UpstreamGroup:      "default",
+		UpstreamTopupRatio: 1,
+		CreatedAt:          common.GetTimestamp(),
+		UpdatedAt:          common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(profile).Error)
+	require.NoError(t, model.DB.Model(profile).Update("upstream_topup_ratio", 0).Error)
+	profile.UpstreamTopupRatio = 0
+
+	require.NoError(t, syncChannelUpstreamGroupRatio(context.Background(), profile))
+
+	var savedProfile model.ChannelUpstreamProfile
+	require.NoError(t, model.DB.First(&savedProfile, profile.Id).Error)
+	require.Equal(t, 0.5, savedProfile.UpstreamGroupRatio)
+	require.Equal(t, 9.0, savedProfile.UpstreamTopupRatio)
+	require.Equal(t, 1, statusRequestCount)
 }
 
 func TestEnsureUpstreamAccessTokenRefreshesBeforeScheduledScanGap(t *testing.T) {

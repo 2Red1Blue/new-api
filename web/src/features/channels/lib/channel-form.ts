@@ -275,7 +275,7 @@ export const channelFormSchema = z
     allow_speed: z.boolean().optional(),
     claude_beta_query: z.boolean().optional(),
     disable_task_polling_sleep: z.boolean().optional(),
-    upstream_rpm_limit: z.number().optional(),
+    upstream_rpm_limit: z.number().int().min(0).optional(),
     upstream_model_update_check_enabled: z.boolean().optional(),
     upstream_model_update_auto_sync_enabled: z.boolean().optional(),
     upstream_model_update_ignored_models: z.string().optional(),

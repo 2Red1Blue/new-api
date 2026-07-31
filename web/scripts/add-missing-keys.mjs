@@ -34,7 +34,11 @@ const newKeys = {
     "Used when logging in to the upstream site before fetching ratios.": "Used when logging in to the upstream site before fetching ratios.",
     "Verification required to reveal the saved upstream password.": "Verification required to reveal the saved upstream password.",
     "Paste Connection Info": "Paste Connection Info",
-    "Verification scope is missing": "Verification scope is missing"
+    "Verification scope is missing": "Verification scope is missing",
+    "Upstream top-up ratio differs": "Upstream top-up ratio differs",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?",
+    "Keep current": "Keep current",
+    "Use upstream": "Use upstream"
   },
   "zh": {
     "Buy a redemption code here, then redeem it above.": "在这里购买兑换码，然后在上方进行兑换。",
@@ -62,7 +66,11 @@ const newKeys = {
     "Used when logging in to the upstream site before fetching ratios.": "在获取倍率前登录上游站点时使用。",
     "Verification required to reveal the saved upstream password.": "需要验证后才能显示已保存的上游密码。",
     "Paste Connection Info": "粘贴连接信息",
-    "Verification scope is missing": "缺少验证范围"
+    "Verification scope is missing": "缺少验证范围",
+    "Upstream top-up ratio differs": "上游充值倍率不同",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "获取到的上游充值倍率为 {{upstream}}，当前值为 {{current}}。是否使用上游值？",
+    "Keep current": "保留当前值",
+    "Use upstream": "使用上游值"
   },
   "fr": {
     "Buy a redemption code here, then redeem it above.": "Achetez un code de recharge ici, puis utilisez-le ci-dessus.",
@@ -90,7 +98,11 @@ const newKeys = {
     "Used when logging in to the upstream site before fetching ratios.": "Utilisé lors de la connexion au site upstream avant de récupérer les ratios.",
     "Verification required to reveal the saved upstream password.": "Une vérification est requise pour afficher le mot de passe upstream enregistré.",
     "Paste Connection Info": "Coller les infos de connexion",
-    "Verification scope is missing": "La portée de vérification est manquante"
+    "Verification scope is missing": "La portée de vérification est manquante",
+    "Upstream top-up ratio differs": "Le ratio de recharge upstream diffère",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "Le ratio de recharge upstream récupéré est {{upstream}}, tandis que la valeur actuelle est {{current}}. Utiliser la valeur upstream ?",
+    "Keep current": "Conserver la valeur actuelle",
+    "Use upstream": "Utiliser la valeur upstream"
   },
   "ja": {
     "Buy a redemption code here, then redeem it above.": "ここで引き換えコードを購入し、上の欄で使用してください。",
@@ -118,7 +130,11 @@ const newKeys = {
     "Used when logging in to the upstream site before fetching ratios.": "倍率取得前にアップストリームサイトへログインするときに使います。",
     "Verification required to reveal the saved upstream password.": "保存済みのアップストリームパスワードを表示するには認証が必要です。",
     "Paste Connection Info": "接続情報を貼り付け",
-    "Verification scope is missing": "検証スコープがありません"
+    "Verification scope is missing": "検証スコープがありません",
+    "Upstream top-up ratio differs": "アップストリームのチャージ倍率が異なります",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "取得したアップストリームのチャージ倍率は {{upstream}}、現在の値は {{current}} です。アップストリームの値を使用しますか？",
+    "Keep current": "現在の値を保持",
+    "Use upstream": "アップストリームの値を使用"
   },
   "ru": {
     "Buy a redemption code here, then redeem it above.": "Купите код пополнения здесь, затем активируйте его выше.",
@@ -146,7 +162,11 @@ const newKeys = {
     "Used when logging in to the upstream site before fetching ratios.": "Используется при входе на upstream-сайт перед получением коэффициентов.",
     "Verification required to reveal the saved upstream password.": "Чтобы показать сохранённый upstream-пароль, требуется подтверждение.",
     "Paste Connection Info": "Вставить данные подключения",
-    "Verification scope is missing": "Область проверки не указана"
+    "Verification scope is missing": "Область проверки не указана",
+    "Upstream top-up ratio differs": "Коэффициент пополнения upstream отличается",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "Полученный коэффициент пополнения upstream равен {{upstream}}, а текущее значение — {{current}}. Использовать значение upstream?",
+    "Keep current": "Сохранить текущее",
+    "Use upstream": "Использовать upstream"
   },
   "vi": {
     "Buy a redemption code here, then redeem it above.": "Mua mã đổi thưởng tại đây, sau đó đổi mã ở phía trên.",
@@ -174,7 +194,11 @@ const newKeys = {
     "Used when logging in to the upstream site before fetching ratios.": "Dùng khi đăng nhập vào trang upstream trước khi lấy tỷ lệ.",
     "Verification required to reveal the saved upstream password.": "Cần xác minh để hiển thị mật khẩu upstream đã lưu.",
     "Paste Connection Info": "Dán thông tin kết nối",
-    "Verification scope is missing": "Thiếu phạm vi xác minh"
+    "Verification scope is missing": "Thiếu phạm vi xác minh",
+    "Upstream top-up ratio differs": "Tỷ lệ nạp tiền upstream khác nhau",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "Tỷ lệ nạp tiền upstream lấy được là {{upstream}}, trong khi giá trị hiện tại là {{current}}. Sử dụng giá trị upstream?",
+    "Keep current": "Giữ giá trị hiện tại",
+    "Use upstream": "Sử dụng upstream"
   },
   "zh-TW": {
     "Buy a redemption code here, then redeem it above.": "在這裡購買兌換碼，然後在上方進行兌換。",
@@ -202,7 +226,11 @@ const newKeys = {
     "Upstream ratios updated": "上游倍率已更新",
     "Used when logging in to the upstream site before fetching ratios.": "在取得倍率前登入上游站點時使用。",
     "Verification required to reveal the saved upstream password.": "需要驗證後才能顯示已儲存的上游密碼。",
-    "Verification scope is missing": "缺少驗證範圍"
+    "Verification scope is missing": "缺少驗證範圍",
+    "Upstream top-up ratio differs": "上游充值倍率不同",
+    "The fetched upstream top-up ratio is {{upstream}}, while the current value is {{current}}. Use the upstream value?": "取得的上游充值倍率為 {{upstream}}，目前值為 {{current}}。是否使用上游值？",
+    "Keep current": "保留目前值",
+    "Use upstream": "使用上游值"
   }
 }
 

@@ -88,7 +88,7 @@ func syncChannelUpstreamGroupRatio(ctx context.Context, profile *model.ChannelUp
 		"upstream_group_ratios": fetched.Raw,
 		"updated_at":            now,
 	}
-	if profile.UpstreamTopupRatio == 0 {
+	if profile.UpstreamTopupRatio <= 0 {
 		if tr, ok, _ := FetchUpstreamTopupRatio(ctx, client, baseURL); ok && tr > 0 {
 			updates["upstream_topup_ratio"] = tr
 		}

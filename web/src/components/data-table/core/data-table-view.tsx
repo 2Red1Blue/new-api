@@ -106,7 +106,6 @@ function UnifiedTableView<TData>({
         <DataTableHeader
           table={props.table}
           applyHeaderSize={props.applyHeaderSize}
-          enableColumnResizing={props.enableColumnResizing}
           className={props.tableHeaderClassName}
           rowClassName={props.tableHeaderRowClassName}
           getColumnClassName={getColumnClassName}
@@ -158,7 +157,6 @@ function SplitHeaderTableView<TData>({
           <DataTableHeader
             table={props.table}
             applyHeaderSize={props.applyHeaderSize}
-            enableColumnResizing={props.enableColumnResizing}
             className={cn('sticky top-0 z-10', props.tableHeaderClassName)}
             rowClassName={props.tableHeaderRowClassName}
             getColumnClassName={getColumnClassName}

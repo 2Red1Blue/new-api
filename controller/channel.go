@@ -251,6 +251,9 @@ func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, e
 	switch channel.Type {
 	case constant.ChannelTypeAnthropic:
 		headers = GetClaudeAuthHeader(key)
+	case constant.ChannelTypeSub2API:
+		headers = make(http.Header)
+		headers.Set("New-Api-User", key)
 	default:
 		headers = GetAuthHeader(key)
 	}
@@ -281,6 +284,8 @@ func applyFetchModelsHeaderOverrides(channel *model.Channel, key string, headers
 
 func buildFetchModelsURL(channelType int, baseURL string) string {
 	switch channelType {
+	case constant.ChannelTypeSub2API:
+		return fmt.Sprintf("%s/api/user/models", baseURL)
 	case constant.ChannelTypeAli:
 		return fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
 	case constant.ChannelTypeZhipu_v4:

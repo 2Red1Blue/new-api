@@ -409,6 +409,60 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 	require.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
 }
 
+func TestFetchSub2APIModelsUsesUserModelsRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/user/models", r.URL.Path)
+		assert.Equal(t, "139", r.Header.Get("New-Api-User"))
+		assert.Empty(t, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"data":[" gpt-5 ","gpt-5","o3"],"success":true}`))
+		assert.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	baseURL := server.URL
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeSub2API,
+		Key:     "139",
+		BaseURL: &baseURL,
+	}
+
+	models, err := fetchChannelUpstreamModelIDs(channel)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5", "o3"}, models)
+}
+
+func TestFetchSub2APIModelsFallsBackToLegacyRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/models":
+			w.WriteHeader(http.StatusNotFound)
+		case "/v1/models":
+			assert.Equal(t, "Bearer legacy-key", r.Header.Get("Authorization"))
+			assert.Empty(t, r.Header.Get("New-Api-User"))
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+			assert.NoError(t, err)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	baseURL := server.URL
+	channel := &model.Channel{
+		Type:    constant.ChannelTypeSub2API,
+		Key:     "legacy-key",
+		BaseURL: &baseURL,
+	}
+
+	models, err := fetchChannelUpstreamModelIDs(channel)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5"}, models)
+}
+
 func TestNormalizeModelNames(t *testing.T) {
 	result := normalizeModelNames([]string{
 		" gpt-4o ",

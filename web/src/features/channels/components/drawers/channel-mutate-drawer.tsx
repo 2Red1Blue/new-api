@@ -185,6 +185,7 @@ import {
 } from '../dialogs/missing-models-confirmation-dialog'
 import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
+import { UpstreamTopupRatioConfirmDialog } from '../dialogs/upstream-topup-ratio-confirm-dialog'
 import { ModelMappingEditor } from '../model-mapping-editor'
 import {
   ChannelAdvancedSection,
@@ -290,6 +291,7 @@ const SENSITIVE_FORM_FIELDS = [
   'proxy',
   'http_protocol',
   'http2_connection_shards',
+  'upstream_rpm_limit',
   'pass_through_body_enabled',
   'system_prompt',
   'system_prompt_override',
@@ -629,6 +631,10 @@ export function ChannelMutateDrawer({
   const [isUpstreamPasswordLoading, setIsUpstreamPasswordLoading] =
     useState(false)
   const [isUpstreamRatiosLoading, setIsUpstreamRatiosLoading] = useState(false)
+  const [pendingUpstreamTopupRatio, setPendingUpstreamTopupRatio] = useState<{
+    current: number
+    upstream: number
+  } | null>(null)
   const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
     useState(false)
   const initialModelsRef = useRef<string[]>([])
@@ -715,9 +721,11 @@ export function ChannelMutateDrawer({
       setIsChannelKeyLoading(false)
       setUpstreamPassword(null)
       setIsUpstreamPasswordLoading(false)
+      setPendingUpstreamTopupRatio(null)
     } else if (channelId) {
       setChannelKey(null)
       setUpstreamPassword(null)
+      setPendingUpstreamTopupRatio(null)
     }
   }, [open, channelId])
 
@@ -769,6 +777,7 @@ export function ChannelMutateDrawer({
   const currentProxy = form.watch('proxy')
   const currentHttpProtocol = form.watch('http_protocol')
   const currentHttp2ConnectionShards = form.watch('http2_connection_shards')
+  const currentUpstreamRpmLimit = form.watch('upstream_rpm_limit')
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
   const currentUpstreamAccount = form.watch('upstream_account')
@@ -1049,7 +1058,9 @@ export function ChannelMutateDrawer({
     currentSystemPrompt?.trim() ||
     currentSystemPromptOverride ||
     (currentHttpProtocol && currentHttpProtocol !== 'auto') ||
-    (currentHttp2ConnectionShards != null && currentHttp2ConnectionShards > 1)
+    (currentHttp2ConnectionShards != null &&
+      currentHttp2ConnectionShards > 1) ||
+    (currentUpstreamRpmLimit != null && currentUpstreamRpmLimit > 0)
   )
   let fieldPassthroughConfigured = false
   if (currentType === 1 || currentType === 57) {
@@ -1420,34 +1431,36 @@ export function ChannelMutateDrawer({
     }
   }, [channelId, withVerification, fetchChannelKey, t])
 
-  const fetchCurrentUpstreamPassword = useCallback(async () => {
-    if (!channelId) {
-      throw new Error('Channel is not selected')
-    }
-
-    setIsUpstreamPasswordLoading(true)
-    try {
-      const res = await getChannelUpstreamPassword(channelId)
-      if (!res.success) {
-        throw new Error(
-          res.message || t('Failed to fetch upstream password')
-        )
+  const fetchCurrentUpstreamPassword = useCallback(
+    async (proofToken?: string) => {
+      if (!channelId) {
+        throw new Error('Channel is not selected')
       }
 
-      const passwordValue = res.data?.password ?? ''
-      setUpstreamPassword(passwordValue)
-      toast.success(t('Upstream password unlocked'))
-      return res
-    } finally {
-      setIsUpstreamPasswordLoading(false)
-    }
-  }, [channelId, t])
+      setIsUpstreamPasswordLoading(true)
+      try {
+        const res = await getChannelUpstreamPassword(channelId, proofToken)
+        if (!res.success) {
+          throw new Error(res.message || t('Failed to fetch upstream password'))
+        }
+
+        const passwordValue = res.data?.password ?? ''
+        setUpstreamPassword(passwordValue)
+        toast.success(t('Upstream password unlocked'))
+        return res
+      } finally {
+        setIsUpstreamPasswordLoading(false)
+      }
+    },
+    [channelId, t]
+  )
 
   const handleRevealUpstreamPassword = useCallback(async () => {
     if (!channelId) return
 
     try {
       await withVerification(fetchCurrentUpstreamPassword, {
+        scope: 'channel.key.read',
         preferredMethod: 'passkey',
         title: 'Verify to view upstream password',
         description:
@@ -1475,20 +1488,34 @@ export function ChannelMutateDrawer({
             })
 
       if (!response.success || !response.data) {
-        throw new Error(response.message || t('Failed to fetch upstream ratios'))
+        throw new Error(
+          response.message || t('Failed to fetch upstream ratios')
+        )
       }
 
       const fetchedData = response.data
-      form.setValue('upstream_group_ratios', fetchedData.group_ratios_raw || '', {
-        shouldDirty: true,
-      })
+      form.setValue(
+        'upstream_group_ratios',
+        fetchedData.group_ratios_raw || '',
+        {
+          shouldDirty: true,
+        }
+      )
       if (
         typeof fetchedData.topup_ratio === 'number' &&
         fetchedData.topup_ratio > 0
       ) {
-        form.setValue('upstream_topup_ratio', fetchedData.topup_ratio, {
-          shouldDirty: true,
-        })
+        const formTopupRatio = form.getValues('upstream_topup_ratio')
+        const currentTopupRatio =
+          typeof formTopupRatio === 'number' && formTopupRatio > 0
+            ? formTopupRatio
+            : 1
+        if (Math.abs(fetchedData.topup_ratio - currentTopupRatio) > 1e-9) {
+          setPendingUpstreamTopupRatio({
+            current: currentTopupRatio,
+            upstream: fetchedData.topup_ratio,
+          })
+        }
       }
       const selectedGroup = form.getValues('upstream_group')?.trim()
       if (
@@ -4670,9 +4697,7 @@ export function ChannelMutateDrawer({
                                         <SelectValue />
                                       </SelectTrigger>
                                     </FormControl>
-                                    <SelectContent
-                                      alignItemWithTrigger={false}
-                                    >
+                                    <SelectContent alignItemWithTrigger={false}>
                                       <SelectGroup>
                                         <SelectItem value='auto'>
                                           {t('Auto')}
@@ -4752,6 +4777,38 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )
                               }}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name='upstream_rpm_limit'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Upstream RPM Limit')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type='number'
+                                      min={0}
+                                      step={1}
+                                      placeholder='0'
+                                      {...field}
+                                      onChange={(event) =>
+                                        field.onChange(
+                                          Number(event.target.value)
+                                        )
+                                      }
+                                    />
+                                  </FormControl>
+                                  <FormDescription>
+                                    {t(
+                                      'Maximum upstream requests per minute for this channel. 0 means unlimited.'
+                                    )}
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
                             />
 
                             <FormField
@@ -5301,6 +5358,23 @@ export function ChannelMutateDrawer({
         detailItems={statusCodeRiskDetailItems}
         onConfirm={() => handleStatusCodeRiskAction(true)}
       />
+
+      {pendingUpstreamTopupRatio && (
+        <UpstreamTopupRatioConfirmDialog
+          open
+          currentRatio={pendingUpstreamTopupRatio.current}
+          upstreamRatio={pendingUpstreamTopupRatio.upstream}
+          onKeepCurrent={() => setPendingUpstreamTopupRatio(null)}
+          onUseUpstream={() => {
+            form.setValue(
+              'upstream_topup_ratio',
+              pendingUpstreamTopupRatio.upstream,
+              { shouldDirty: true }
+            )
+            setPendingUpstreamTopupRatio(null)
+          }}
+        />
+      )}
     </>
   )
 }

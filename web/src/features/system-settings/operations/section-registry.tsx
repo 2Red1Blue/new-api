@@ -48,22 +48,7 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <MonitoringSettingsSection
         defaultValues={{
-          ChannelDisableThreshold: settings.ChannelDisableThreshold,
           QuotaRemindThreshold: settings.QuotaRemindThreshold,
-          AutomaticDisableChannelEnabled:
-            settings.AutomaticDisableChannelEnabled,
-          AutomaticEnableChannelEnabled: settings.AutomaticEnableChannelEnabled,
-          AutomaticDisableKeywords: settings.AutomaticDisableKeywords,
-          AutomaticDisableStatusCodes: settings.AutomaticDisableStatusCodes,
-          AutomaticRetryStatusCodes: settings.AutomaticRetryStatusCodes,
-          'monitor_setting.auto_test_channel_enabled':
-            settings['monitor_setting.auto_test_channel_enabled'],
-          'monitor_setting.auto_test_channel_minutes':
-            settings['monitor_setting.auto_test_channel_minutes'],
-          'monitor_setting.auto_priority_scan_enabled':
-            settings['monitor_setting.auto_priority_scan_enabled'],
-          'monitor_setting.auto_priority_scan_interval_hours':
-            settings['monitor_setting.auto_priority_scan_interval_hours'],
           'perf_metrics_setting.enabled':
             settings['perf_metrics_setting.enabled'] ?? true,
           'perf_metrics_setting.flush_interval':

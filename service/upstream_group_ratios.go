@@ -89,10 +89,10 @@ func UpstreamCredentialFromProfileRecord(profile *model.ChannelUpstreamProfile) 
 }
 
 // FetchUpstreamGroupRatios 按以下顺序尝试获取上游分组倍率：
-//  1. account + password → 优先登录 new-api 后获取标准端点，避免未登录接口返回 HTML 登录页
+//  1. account + password → 优先登录 new-api 后获取用户分组或标准端点，避免未登录接口返回 HTML 登录页
 //  2. account + password → 再尝试 sub2api 邮箱+密码登录获取 token
 //  3. password 为空，account 当 sub2api access token 直连
-//  4. 无认证试标准 new-api 端点（/api/ratio_config, /api/pricing）
+//  4. 无认证试标准 new-api 端点（/api/user/self/groups, /api/ratio_config, /api/pricing）
 //  5. 无认证试 sub2api 端点（/api/v1/groups/available）
 func FetchUpstreamGroupRatios(ctx context.Context, client *http.Client, baseURL string, credential *UpstreamPricingCredential) (*UpstreamGroupRatiosResult, error) {
 	account := ""
@@ -204,7 +204,7 @@ func LoginUpstreamLegacy(ctx context.Context, baseURL string, credential *Upstre
 // --- new-api 认证路径 ---
 
 func fetchUpstreamGroupRatiosLegacy(ctx context.Context, client *http.Client, baseURL string, userID string) (*UpstreamGroupRatiosResult, error) {
-	endpoints := []string{"/api/ratio_config", "/api/pricing"}
+	endpoints := []string{"/api/user/self/groups", "/api/ratio_config", "/api/pricing"}
 	var lastErr error
 	for _, endpoint := range endpoints {
 		source := baseURL + endpoint
@@ -217,6 +217,21 @@ func fetchUpstreamGroupRatiosLegacy(ctx context.Context, client *http.Client, ba
 		ratios := extractFloatMapByKeys(body, "group_ratio", "group_ratios", "topup_group_ratio")
 		if len(ratios) == 0 {
 			ratios = extractFloatMapByKeys(data, "group_ratio", "group_ratios", "topup_group_ratio")
+		}
+		if len(ratios) == 0 {
+			if groups, ok := data.(map[string]any); ok {
+				ratios = make(map[string]float64, len(groups))
+				for name, rawGroup := range groups {
+					group, ok := rawGroup.(map[string]any)
+					if !ok {
+						continue
+					}
+					ratio, ok := asFloat64(group["ratio"])
+					if ok {
+						ratios[name] = ratio
+					}
+				}
+			}
 		}
 		if len(ratios) == 0 {
 			lastErr = errors.New("上游未返回 group_ratio")
@@ -252,36 +267,55 @@ func loginUpstreamLegacy(ctx context.Context, baseURL string, credential *Upstre
 	if err != nil {
 		return nil, "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/user/login", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, "", err
+	loginURLs := []string{
+		baseURL + "/api/user/login?turnstile=",
+		baseURL + "/api/user/login",
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("上游登录返回 %s", resp.Status)
-	}
-	var response map[string]any
-	if err := common.DecodeJson(io.LimitReader(resp.Body, 1<<20), &response); err != nil {
-		return nil, "", err
-	}
-	success, _ := response["success"].(bool)
-	if !success {
-		message, _ := response["message"].(string)
-		if strings.TrimSpace(message) == "" {
-			message = "上游登录失败"
+	var lastErr error
+	for _, loginURL := range loginURLs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(bodyBytes))
+		if err != nil {
+			lastErr = err
+			continue
 		}
-		return nil, "", errors.New(message)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = fmt.Errorf("上游登录返回 %s", resp.Status)
+			_ = resp.Body.Close()
+			continue
+		}
+		var response map[string]any
+		err = common.DecodeJson(io.LimitReader(resp.Body, 1<<20), &response)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		success, _ := response["success"].(bool)
+		if !success {
+			message, _ := response["message"].(string)
+			if strings.TrimSpace(message) == "" {
+				message = "上游登录失败"
+			}
+			lastErr = errors.New(message)
+			continue
+		}
+		userID := findUserIDString(response["data"])
+		if userID == "" {
+			lastErr = errors.New("上游登录未返回用户 ID")
+			continue
+		}
+		return client, userID, nil
 	}
-	userID := findUserIDString(response["data"])
-	if userID == "" {
-		return nil, "", errors.New("上游登录未返回用户 ID")
+	if lastErr == nil {
+		lastErr = errors.New("上游登录失败")
 	}
-	return client, userID, nil
+	return nil, "", lastErr
 }
 
 // --- sub2api 认证路径 ---

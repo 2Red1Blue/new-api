@@ -352,6 +352,10 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return service.FetchCodexChannelModels(channel)
 	}
 
+	if channel.Type == constant.ChannelTypeSub2API {
+		return fetchSub2APIUpstreamModelIDs(channel, baseURL)
+	}
+
 	url := buildFetchModelsURL(channel.Type, baseURL)
 	if ids, ok, err := fetchChannelUpstreamModelIDsWithSessionAuth(channel, url); ok || err != nil {
 		return ids, err
@@ -377,7 +381,71 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 	return fetchOpenAICompatibleModelIDs(ctx, client, url, headers)
 }
 
+func fetchSub2APIUpstreamModelIDs(channel *model.Channel, baseURL string) ([]string, error) {
+	key, _, apiErr := channel.GetNextEnabledKey()
+	if apiErr != nil {
+		return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
+	}
+	key = strings.TrimSpace(key)
+
+	// Current Sub2API-compatible upstreams expose dashboard-visible models as
+	// strings from /api/user/models and authenticate with New-Api-User.
+	modelURL := buildFetchModelsURL(channel.Type, baseURL)
+	headers, err := buildFetchModelsHeaders(channel, key)
+	if err != nil {
+		return nil, err
+	}
+	body, dashboardErr := getFetchModelsResponseBody(http.MethodGet, modelURL, channel, headers)
+	if dashboardErr == nil {
+		var result struct {
+			Data []string `json:"data"`
+		}
+		if err := common.Unmarshal(body, &result); err == nil && result.Data != nil {
+			ids := normalizeModelNames(result.Data)
+			if len(ids) > 0 {
+				return ids, nil
+			}
+			dashboardErr = errors.New("no valid model IDs")
+		} else if err != nil {
+			dashboardErr = fmt.Errorf("invalid Sub2API models response: %w", err)
+		} else {
+			dashboardErr = errors.New("data is required")
+		}
+	}
+
+	// Keep compatibility with older Sub2API deployments that still expose the
+	// OpenAI-compatible /v1/models route with a bearer token.
+	legacyURL := fmt.Sprintf("%s/v1/models", baseURL)
+	if ids, ok, legacyErr := fetchChannelUpstreamModelIDsWithSessionAuth(channel, legacyURL); ok {
+		if legacyErr == nil {
+			return ids, nil
+		}
+		dashboardErr = fmt.Errorf("%v; legacy route: %w", dashboardErr, legacyErr)
+	} else {
+		legacyHeaders := GetAuthHeader(key)
+		if err := applyFetchModelsHeaderOverrides(channel, key, legacyHeaders); err != nil {
+			return nil, err
+		}
+		client, clientErr := service.NewProxyHttpClient(channel.GetSetting().Proxy)
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		legacyCtx, legacyCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer legacyCancel()
+		if ids, legacyErr := fetchOpenAICompatibleModelIDs(legacyCtx, client, legacyURL, legacyHeaders); legacyErr == nil {
+			return ids, nil
+		} else {
+			dashboardErr = fmt.Errorf("%v; legacy route: %w", dashboardErr, legacyErr)
+		}
+	}
+
+	return nil, dashboardErr
+}
+
 func fetchChannelUpstreamModelIDsWithSessionAuth(channel *model.Channel, url string) ([]string, bool, error) {
+	if model.DB == nil {
+		return nil, false, nil
+	}
 	profile, err := model.GetChannelUpstreamProfileByChannelId(channel.Id)
 	if err != nil || profile == nil {
 		return nil, false, nil
