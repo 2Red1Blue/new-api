@@ -9,10 +9,12 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -78,14 +80,21 @@ func pricingModelName(info *relaycommon.RelayInfo) string {
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (hosttypes.PriceData, error) {
-	pricingModel := pricingModelName(info)
-	modelPrice, usePrice := ratio_setting.GetModelPrice(pricingModel, false)
+	if info != nil {
+		if info.PricingModelName != "" && info.PricingModelName != info.OriginModelName {
+			info.BillingModelName = info.PricingModelName
+		} else if matched := resolveBillingModelName(info.GetOriginModelName()); matched != "" && matched != info.OriginModelName {
+			info.BillingModelName = matched
+		}
+	}
+	billingModelName := info.GetBillingModelName()
+	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	// Check if this model uses tiered_expr billing
-	if billing_setting.GetBillingMode(pricingModel) == billing_setting.BillingModeTieredExpr {
-		return modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo, pricingModel)
+	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
+		return modelPriceHelperTiered(c, info, billingModelName, promptTokens, meta, groupRatioInfo)
 	}
 
 	var preConsumedQuota int
@@ -106,7 +115,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 		var success bool
 		var matchName string
-		modelRatio, success, matchName = ratio_setting.GetModelRatio(pricingModel)
+		modelRatio, success, matchName = ratio_setting.GetModelRatio(billingModelName)
 		if !success {
 			acceptUnsetRatio := false
 			if info.UserSetting.AcceptUnsetRatioModel {
@@ -116,15 +125,15 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 				return hosttypes.PriceData{}, modelPriceNotConfiguredError(matchName, info.UserId)
 			}
 		}
-		completionRatio = ratio_setting.GetCompletionRatio(pricingModel)
-		cacheRatio, _ = ratio_setting.GetCacheRatio(pricingModel)
-		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(pricingModel)
+		completionRatio = ratio_setting.GetCompletionRatio(billingModelName)
+		cacheRatio, _ = ratio_setting.GetCacheRatio(billingModelName)
+		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(billingModelName)
 		cacheCreationRatio5m = cacheCreationRatio
 		// 固定1h和5min缓存写入价格的比例
 		cacheCreationRatio1h = cacheCreationRatio * claudeCacheCreation1hMultiplier
-		imageRatio, _ = ratio_setting.GetImageRatio(pricingModel)
-		audioRatio = ratio_setting.GetAudioRatio(pricingModel)
-		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(pricingModel)
+		imageRatio, _ = ratio_setting.GetImageRatio(billingModelName)
+		audioRatio = ratio_setting.GetAudioRatio(billingModelName)
+		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(billingModelName)
 		ratio := modelRatio * groupRatioInfo.GroupRatio
 		quota, err := common.QuotaFromFloatStrict(float64(preConsumedTokens) * ratio)
 		if err != nil {
@@ -275,10 +284,57 @@ func HasModelBillingConfig(modelName string) bool {
 	return ok && strings.TrimSpace(expr) != ""
 }
 
-func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo hosttypes.GroupRatioInfo, pricingModel string) (hosttypes.PriceData, error) {
-	exprStr, ok := billing_setting.GetBillingExpr(pricingModel)
+// HasPriceOrRatioEntry reports whether name has a configured price, ratio, or
+// tiered billing-mode entry after a single wildcard normalization. Self-use
+// fallback does not count as a configured ratio.
+func HasPriceOrRatioEntry(name string) bool {
+	formatted := ratio_setting.FormatMatchingModelName(name)
+	if _, ok := ratio_setting.GetModelPrice(formatted, false); ok {
+		return true
+	}
+	if ratio_setting.HasConfiguredModelRatio(formatted) {
+		return true
+	}
+	return billing_setting.GetBillingMode(formatted) == billing_setting.BillingModeTieredExpr
+}
+
+func resolveBillingModelName(origin string) string {
+	var candidates []string
+	if !reasoning.ParseModelModifiers(origin).HasModifiers() {
+		candidates = append(candidates, origin)
+	}
+	candidates = append(candidates, hostreasoning.CanonicalBillingModelNames(origin)...)
+	base := hostreasoning.BaseModelName(origin)
+	candidates = append(candidates, base)
+
+	seen := make(map[string]struct{}, len(candidates))
+	matched := ""
+	for _, name := range candidates {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		if HasPriceOrRatioEntry(name) {
+			matched = name
+			break
+		}
+	}
+	if matched == "" {
+		matched = base
+	}
+	return matched
+}
+
+func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billingModelName string, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo hosttypes.GroupRatioInfo) (hosttypes.PriceData, error) {
+	exprStr, ok := billing_setting.GetBillingExpr(billingModelName)
 	if !ok {
-		return hosttypes.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", pricingModel)
+		return hosttypes.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", billingModelName)
+	}
+	if info.RelayFormat == types.RelayFormatOpenAIRealtime && billingexpr.UsesFixedPricing(exprStr) {
+		return hosttypes.PriceData{}, fmt.Errorf("fixed pricing is not supported for Realtime requests")
 	}
 
 	estimatedCompletionTokens := meta.MaxTokens
@@ -297,7 +353,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		Len: float64(promptTokens),
 	}, requestInput)
 	if err != nil {
-		return hosttypes.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", pricingModel, err)
+		return hosttypes.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", billingModelName, err)
 	}
 
 	// Expression coefficients are $/1M tokens prices; convert to quota the same way per-call billing does.
@@ -318,7 +374,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	exprHash := billingexpr.ExprHashString(exprStr)
 	snapshot := &billingexpr.BillingSnapshot{
 		BillingMode:               billing_setting.BillingModeTieredExpr,
-		ModelName:                 info.OriginModelName,
+		ModelName:                 billingModelName,
 		ExprString:                exprStr,
 		ExprHash:                  exprHash,
 		GroupRatio:                groupRatioInfo.GroupRatio,
@@ -327,6 +383,8 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		EstimatedQuotaBeforeGroup: quotaBeforeGroup,
 		EstimatedQuotaAfterGroup:  preConsumedQuota,
 		EstimatedTier:             trace.MatchedTier,
+		EstimatedBillingUnit:      trace.BillingUnit,
+		EstimatedFixedPrice:       trace.FixedPrice,
 		QuotaPerUnit:              common.QuotaPerUnit,
 		ExprVersion:               billingexpr.ExprVersion(exprStr),
 	}
@@ -339,7 +397,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		QuotaToPreConsume: preConsumedQuota,
 	}
 
-	logger.LogDebug(c, "model_price_helper_tiered result: model=%s preConsume=%d quotaBeforeGroup=%.2f groupRatio=%.2f tier=%s", info.OriginModelName, preConsumedQuota, quotaBeforeGroup, groupRatioInfo.GroupRatio, trace.MatchedTier)
+	logger.LogDebug(c, "model_price_helper_tiered result: model=%s preConsume=%d quotaBeforeGroup=%.2f groupRatio=%.2f tier=%s", billingModelName, preConsumedQuota, quotaBeforeGroup, groupRatioInfo.GroupRatio, trace.MatchedTier)
 
 	info.PriceData = priceData
 	return priceData, nil

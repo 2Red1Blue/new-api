@@ -23,7 +23,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	info.InitChannelMeta(c)
 	info.MarkTiming("responses_channel_meta_ready")
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		!common.IsResponsesCompactAPIType(info.ApiType) {
+		!common.SupportsResponsesCompact(info.ChannelType, info.ApiType) {
 		return types.NewErrorWithStatusCode(
 			fmt.Errorf("unsupported endpoint %q for api type %d", "/v1/responses/compact", info.ApiType),
 			types.ErrorCodeInvalidRequest,
@@ -73,6 +73,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 	info.MarkTiming("responses_model_mapped")
+	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {
+		return newConvertRequestFailedError(c, info, err)
+	}
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
@@ -86,12 +89,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.ReaderOnly(storage)
+		requestBody = common.NewReplayableBodyReader(storage)
 		info.MarkTiming("responses_passthrough_body_ready")
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			return newConvertRequestFailedError(c, info, err)
 		}
 		info.MarkTiming("responses_convert_done")
 		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
@@ -118,13 +121,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		info.MarkTiming("responses_param_override_done")
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
-		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		defer closer.Close()
 		jsonData = nil
-		info.UpstreamRequestBodySize = size
 		requestBody = body
 		info.MarkTiming("responses_body_ready")
 	}

@@ -117,7 +117,7 @@ function hasRatio(value: number | null | undefined): boolean {
  * priceRate represents how much users need to recharge (in the display currency)
  * to get 1 USD credit. usdExchangeRate is the real exchange rate.
  *
- * The returned value will be formatted by formatCurrencyFromUSD, which will
+ * The returned value will be formatted by formatBillingCurrencyFromUSD, which will
  * multiply by the display currency's exchange rate.
  *
  * Examples:
@@ -127,14 +127,14 @@ function hasRatio(value: number | null | undefined): boolean {
  *    - priceRate = 0.5 (recharge $0.5 to get $1 credit)
  *    - usdExchangeRate = 1
  *    - Return: 1 × 0.5 / 1 = 0.5
- *    - formatCurrencyFromUSD(0.5) → $0.5 ✓
+ *    - formatBillingCurrencyFromUSD(0.5) → $0.5 ✓
  *
  * 2. Display currency = CNY:
  *    - Model: 1 USD
  *    - priceRate = 4 (recharge ¥4 to get $1 credit)
  *    - usdExchangeRate = 7 (real rate: 1 USD = ¥7)
  *    - Return: 1 × 4 / 7 = 0.571
- *    - formatCurrencyFromUSD(0.571) → 0.571 × 7 = ¥4 ✓
+ *    - formatBillingCurrencyFromUSD(0.571) → 0.571 × 7 = ¥4 ✓
  *    - Normal price: ¥7, Recharge price: ¥4 (cheaper!)
  */
 function applyRechargeRate(
@@ -151,15 +151,17 @@ function formatPricingCurrencyFromUSD(
   amountUSD: number | null | undefined,
   usdExchangeRate: number,
   options: CurrencyFormatOptions,
-  currency?: PricingCurrency
+  currency?: PricingCurrency,
+  showCurrencySymbol = true
 ): string {
+  const formatOptions = { ...options, showSymbol: showCurrencySymbol }
   if (!currency) {
-    return formatCurrencyFromUSD(amountUSD, options)
+    return formatCurrencyFromUSD(amountUSD, formatOptions)
   }
 
   return formatBillingCurrencyFromUSD(
     amountUSD,
-    options,
+    formatOptions,
     currency,
     Math.max(usdExchangeRate || 1, 0.001)
   )
@@ -176,7 +178,7 @@ export function formatPrice(
   priceRate = 1,
   usdExchangeRate = 1,
   selectedGroup?: string,
-  currency?: PricingCurrency
+  currencyOrShowSymbol?: PricingCurrency | boolean
 ): string {
   if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
     return '-'
@@ -193,6 +195,9 @@ export function formatPrice(
   )
 
   const price = priceInUSD / TOKEN_UNIT_DIVISORS[tokenUnit]
+  const currency =
+    typeof currencyOrShowSymbol === 'string' ? currencyOrShowSymbol : undefined
+  const showCurrencySymbol = currencyOrShowSymbol !== false
   return formatPricingCurrencyFromUSD(
     price,
     usdExchangeRate,
@@ -201,7 +206,8 @@ export function formatPrice(
       digitsSmall: 6,
       abbreviate: false,
     },
-    currency
+    currency,
+    showCurrencySymbol
   )
 }
 
@@ -293,7 +299,7 @@ export function formatRequestPrice(
   priceRate = 1,
   usdExchangeRate = 1,
   selectedGroup?: string,
-  currency?: PricingCurrency
+  currencyOrShowSymbol?: PricingCurrency | boolean
 ): string {
   if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
     return '-'
@@ -310,6 +316,9 @@ export function formatRequestPrice(
     usdExchangeRate
   )
 
+  const currency =
+    typeof currencyOrShowSymbol === 'string' ? currencyOrShowSymbol : undefined
+  const showCurrencySymbol = currencyOrShowSymbol !== false
   return formatPricingCurrencyFromUSD(
     priceInUSD,
     usdExchangeRate,
@@ -318,6 +327,7 @@ export function formatRequestPrice(
       digitsSmall: 4,
       abbreviate: false,
     },
-    currency
+    currency,
+    showCurrencySymbol
   )
 }

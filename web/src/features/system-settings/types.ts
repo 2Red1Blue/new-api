@@ -161,6 +161,7 @@ export type SiteSettings = {
   About: string
   HomePageContent: string
   ServerAddress: string
+  TaskPublicAddress: string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
@@ -191,6 +192,8 @@ export type AuthSettings = {
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
+  'telegram.client_id': string
+  'telegram.client_secret': string
   TelegramBotToken: string
   TelegramBotName: string
   LinuxDOOAuthEnabled: boolean
@@ -270,6 +273,7 @@ export type ModelSettings = {
   UserUsableGroups: string
   GroupGroupRatio: string
   AutoGroups: string
+  MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
   RetryTimes: number
@@ -281,7 +285,11 @@ export type ModelSettings = {
   AutomaticRetryStatusCodes: string
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
-  'monitor_setting.channel_test_mode': 'scheduled_all' | 'passive_recovery'
+  'monitor_setting.channel_test_concurrency': number
+  'monitor_setting.channel_test_mode':
+    | 'scheduled_all'
+    | 'auto_ban_only'
+    | 'passive_recovery'
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean
@@ -324,6 +332,7 @@ export type BillingSettings = {
   UserUsableGroups: string
   GroupGroupRatio: string
   AutoGroups: string
+  MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
   PayAddress: string
@@ -472,6 +481,12 @@ export type DifferencesMap = Record<
   Partial<Record<RatioType, RatioDifference>>
 >
 
+export type PricingSyncValues = Partial<Record<RatioType, number | string>>
+export type PricingSyncModels = Record<
+  string,
+  { current: PricingSyncValues; upstreams: Record<string, PricingSyncValues> }
+>
+
 export type UpstreamChannelsResponse = {
   success: boolean
   message: string
@@ -501,6 +516,7 @@ export type UpstreamRatiosResponse = {
   message: string
   data: {
     differences: DifferencesMap
+    prices: PricingSyncModels
     test_results: TestResult[]
   }
 }

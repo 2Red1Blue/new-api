@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel/advancedcustom"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
@@ -264,21 +266,49 @@ func getUpstreamModelUpdateMinCheckIntervalSeconds() int64 {
 
 func parseOpenAIModelIDs(body []byte) ([]string, error) {
 	var result struct {
-		Data []OpenAIModel `json:"data"`
+		Data *[]OpenAIModel `json:"data"`
 	}
 	if err := common.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("invalid OpenAI Models response: %w", err)
 	}
 	if result.Data == nil {
-		return nil, errors.New("data is required")
+		return nil, errors.New("invalid OpenAI Models response: data is required")
 	}
-	ids := normalizeModelNames(lo.Map(result.Data, func(item OpenAIModel, _ int) string {
+	ids := normalizeModelNames(lo.Map(*result.Data, func(item OpenAIModel, _ int) string {
 		return item.ID
 	}))
 	if len(ids) == 0 {
-		return nil, errors.New("no valid model IDs")
+		return nil, errors.New("OpenAI Models response contains no valid model IDs")
 	}
 	return ids, nil
+}
+
+func sanitizeAdvancedCustomRequestError(err error, key string, requestURL string) error {
+	err = sanitizeFetchModelsError(err, key)
+	if err == nil {
+		return nil
+	}
+	parsedURL, parseErr := url.Parse(requestURL)
+	if parseErr != nil {
+		return err
+	}
+	message := err.Error()
+	for _, value := range parsedURL.Query() {
+		for _, secret := range value {
+			if secret == "" {
+				continue
+			}
+			message = strings.ReplaceAll(message, secret, "[REDACTED]")
+			message = strings.ReplaceAll(message, url.QueryEscape(secret), "[REDACTED]")
+			message = strings.ReplaceAll(message, url.PathEscape(secret), "[REDACTED]")
+		}
+	}
+	if key != "" {
+		message = strings.ReplaceAll(message, key, "[REDACTED]")
+		message = strings.ReplaceAll(message, url.QueryEscape(key), "[REDACTED]")
+		message = strings.ReplaceAll(message, url.PathEscape(key), "[REDACTED]")
+	}
+	return errors.New(message)
 }
 
 func getFetchModelsResponseBody(method string, requestURL string, channel *model.Channel, headers http.Header) ([]byte, error) {
@@ -308,14 +338,20 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return nil, fmt.Errorf("status code: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("status code: %d", resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		plugin, ok := jsplugin.DefaultRegistry.Get(channel.GetSetting().TaskPluginKey)
+		if !ok {
+			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
+		}
+		return normalizeModelNames(plugin.Meta.Models), nil
+	}
+	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -356,8 +392,33 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return fetchSub2APIUpstreamModelIDs(channel, baseURL)
 	}
 
-	url := buildFetchModelsURL(channel.Type, baseURL)
-	if ids, ok, err := fetchChannelUpstreamModelIDsWithSessionAuth(channel, url); ok || err != nil {
+	var requestURL string
+	switch channel.Type {
+	case constant.ChannelTypeAli:
+		requestURL = fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
+	case constant.ChannelTypeZhipu_v4:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			requestURL = fmt.Sprintf("%s/models", plan.OpenAIBaseURL)
+		} else {
+			requestURL = fmt.Sprintf("%s/api/paas/v4/models", baseURL)
+		}
+	case constant.ChannelTypeVolcEngine:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			requestURL = fmt.Sprintf("%s/v1/models", plan.OpenAIBaseURL)
+		} else {
+			requestURL = fmt.Sprintf("%s/api/v3/models", baseURL)
+		}
+	case constant.ChannelTypeMoonshot:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			requestURL = fmt.Sprintf("%s/models", plan.OpenAIBaseURL)
+		} else {
+			requestURL = fmt.Sprintf("%s/v1/models", baseURL)
+		}
+	default:
+		requestURL = fmt.Sprintf("%s/v1/models", baseURL)
+	}
+
+	if ids, ok, err := fetchChannelUpstreamModelIDsWithSessionAuth(channel, requestURL); ok || err != nil {
 		return ids, err
 	}
 
@@ -376,9 +437,10 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 	defer cancel()
 	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeAdvancedCustomRequestError(err, key, requestURL)
 	}
-	return fetchOpenAICompatibleModelIDs(ctx, client, url, headers)
+	ids, err := fetchOpenAICompatibleModelIDs(ctx, client, requestURL, headers)
+	return ids, sanitizeAdvancedCustomRequestError(err, key, requestURL)
 }
 
 func fetchSub2APIUpstreamModelIDs(channel *model.Channel, baseURL string) ([]string, error) {
@@ -439,7 +501,7 @@ func fetchSub2APIUpstreamModelIDs(channel *model.Channel, baseURL string) ([]str
 		}
 	}
 
-	return nil, dashboardErr
+	return nil, sanitizeAdvancedCustomRequestError(dashboardErr, key, modelURL)
 }
 
 func fetchChannelUpstreamModelIDsWithSessionAuth(channel *model.Channel, url string) ([]string, bool, error) {
@@ -538,7 +600,7 @@ func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string)
 
 func updateChannelUpstreamModelSettings(channel *model.Channel, settings dto.ChannelOtherSettings, updateModels bool) error {
 	channel.SetOtherSettings(settings)
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"settings": channel.OtherSettings,
 	}
 	if updateModels {
@@ -930,7 +992,7 @@ func ApplyChannelUpstreamModelUpdates(c *gin.Context) {
 		refreshChannelRuntimeCache()
 	}
 
-	recordManageAudit(c, "channel.upstream_apply", map[string]interface{}{
+	recordManageAudit(c, "channel.upstream_apply", map[string]any{
 		"id": channel.Id,
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -1128,7 +1190,7 @@ func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 		refreshChannelRuntimeCache()
 	}
 
-	recordManageAudit(c, "channel.upstream_apply_all", map[string]interface{}{
+	recordManageAudit(c, "channel.upstream_apply_all", map[string]any{
 		"count": len(results),
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -1169,7 +1231,7 @@ func DetectAllChannelUpstreamModelUpdates(c *gin.Context) {
 		return
 	}
 
-	recordManageAudit(c, "channel.upstream_detect_all", map[string]interface{}{
+	recordManageAudit(c, "channel.upstream_detect_all", map[string]any{
 		"task_id": task.TaskID,
 	})
 	c.JSON(http.StatusOK, gin.H{

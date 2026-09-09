@@ -42,7 +42,7 @@ type UptimeGroupResult struct {
 	Monitors     []Monitor `json:"monitors"`
 }
 
-func getAndDecode(ctx context.Context, client *http.Client, url string, dest interface{}) error {
+func getAndDecode(ctx context.Context, client *http.Client, url string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func getAndDecode(ctx context.Context, client *http.Client, url string, dest int
 	return json.NewDecoder(resp.Body).Decode(dest)
 }
 
-func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) UptimeGroupResult {
+func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]any) UptimeGroupResult {
 	url, _ := groupConfig["url"].(string)
 	slug, _ := groupConfig["slug"].(string)
 	categoryName, _ := groupConfig["categoryName"].(string)
@@ -149,7 +149,6 @@ func GetUptimeKumaStatus(c *gin.Context) {
 
 	g, gCtx := errgroup.WithContext(ctx)
 	for i, group := range groups {
-		i, group := i, group
 		g.Go(func() error {
 			results[i] = fetchGroupData(gCtx, client, group)
 			return nil

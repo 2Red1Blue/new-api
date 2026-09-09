@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/reasonmap"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -239,7 +240,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 		claudeRequest.MaxTokens = &defaultMaxTokens
 	}
 
-	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffix(textRequest.Model); ok && effortLevel != "" &&
+	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffixWithSuffixes(textRequest.Model, reasoning.EffortSuffixes); ok && effortLevel != "" &&
 		(strings.HasPrefix(textRequest.Model, "claude-opus-4-6") ||
 			strings.HasPrefix(textRequest.Model, "claude-opus-4-7") ||
 			strings.HasPrefix(textRequest.Model, "claude-opus-4-8")) {
@@ -841,6 +842,9 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 		// 最终的usage获取
 		if claudeResponse.Usage != nil {
 			claudeInfo.Usage.UsageSemantic = "anthropic"
+			if claudeResponse.Usage.BillingUsage != nil {
+				claudeInfo.Usage.BillingUsage = dto.CloneBillingUsage(claudeResponse.Usage.BillingUsage)
+			}
 			if claudeResponse.Usage.InputTokens > 0 {
 				// 不叠加，只取最新的
 				claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
@@ -911,7 +915,14 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		countClaudeStreamBillableTools(c, info, &claudeResponse)
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
-		response := StreamResponseClaude2OpenAI(&claudeResponse)
+		state, err := claudeToChatStreamState(info)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		response, err := state.ConvertChunk(&claudeResponse)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
 
 		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
 			return nil
@@ -919,10 +930,83 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 
 		countClaudeStreamBillableTools(c, info, &claudeResponse)
 
+		if response == nil {
+			return nil
+		}
 		err = helper.ObjectData(c, response)
 		if err != nil {
 			logger.LogError(c, "send_stream_response_failed: "+err.Error())
 		}
+	} else if info.RelayFormat == types.RelayFormatGemini {
+		state, err := claudeToGeminiStreamState(info)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		results, err := service.ConvertStreamResponseChunk(c, info, state, &claudeResponse)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		if !FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo) {
+			return nil
+		}
+		countClaudeStreamBillableTools(c, info, &claudeResponse)
+		if sendErr := sendGeminiStreamResults(c, results); sendErr != nil {
+			return sendErr
+		}
+	}
+	return nil
+}
+
+func claudeToChatStreamState(info *relaycommon.RelayInfo) (*relayconvert.ClaudeToChatStreamState, error) {
+	if info != nil && info.ClaudeToChatStreamState != nil {
+		state, ok := info.ClaudeToChatStreamState.(*relayconvert.ClaudeToChatStreamState)
+		if !ok || state == nil {
+			return nil, fmt.Errorf("invalid Claude-to-Chat stream state %T", info.ClaudeToChatStreamState)
+		}
+		return state, nil
+	}
+
+	state := relayconvert.NewClaudeToChatStreamState()
+	if info != nil {
+		info.ClaudeToChatStreamState = state
+	}
+	return state, nil
+}
+
+func claudeToGeminiStreamState(info *relaycommon.RelayInfo) (*relayconvert.ResponseStreamState, error) {
+	if info != nil && info.ChatToGeminiStreamState != nil {
+		state, ok := info.ChatToGeminiStreamState.(*relayconvert.ResponseStreamState)
+		if !ok || state == nil {
+			return nil, fmt.Errorf("invalid Claude-to-Gemini stream state %T", info.ChatToGeminiStreamState)
+		}
+		return state, nil
+	}
+
+	state, err := relayconvert.NewResponseStreamState(types.RelayFormatClaude, types.RelayFormatGemini, relayconvert.ResponseStreamOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if info != nil {
+		info.ChatToGeminiStreamState = state
+	}
+	return state, nil
+}
+
+func sendGeminiStreamResults(c *gin.Context, results []relayconvert.ResponseResult) *types.NewAPIError {
+	for _, result := range results {
+		geminiResponse, ok := result.Value.(*dto.GeminiChatResponse)
+		if !ok {
+			return types.NewError(fmt.Errorf("expected Gemini stream response, got %T", result.Value), types.ErrorCodeBadResponseBody)
+		}
+		if geminiResponse == nil {
+			continue
+		}
+		data, err := common.Marshal(geminiResponse)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		c.Render(-1, common.CustomEvent{Data: "data: " + string(data)})
+		_ = helper.FlushWriter(c)
 	}
 	return nil
 }
@@ -966,6 +1050,19 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	if claudeInfo.Usage != nil {
 		claudeInfo.Usage.UsageSemantic = "anthropic"
 	}
+	if claudeInfo.Usage.BillingUsage == nil {
+		claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(&dto.ClaudeUsage{
+			InputTokens:                 claudeInfo.Usage.PromptTokens,
+			CacheCreationInputTokens:    claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens,
+			CacheReadInputTokens:        claudeInfo.Usage.PromptTokensDetails.CachedTokens,
+			OutputTokens:                claudeInfo.Usage.CompletionTokens,
+			ClaudeCacheCreation5mTokens: claudeInfo.Usage.ClaudeCacheCreation5mTokens,
+			ClaudeCacheCreation1hTokens: claudeInfo.Usage.ClaudeCacheCreation1hTokens,
+		})
+		if claudeInfo.Usage.BillingUsage != nil && !claudeInfo.Done {
+			claudeInfo.Usage.BillingUsage.Estimated = true
+		}
+	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
@@ -979,6 +1076,20 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 			}
 		}
 		helper.Done(c)
+	} else if info.RelayFormat == types.RelayFormatGemini {
+		state, err := claudeToGeminiStreamState(info)
+		if err != nil {
+			common.SysLog("error creating Gemini stream state: " + err.Error())
+			return
+		}
+		results, err := service.FinalizeStreamResponse(c, info, state)
+		if err != nil {
+			common.SysLog("error finalizing Gemini stream response: " + err.Error())
+			return
+		}
+		if sendErr := sendGeminiStreamResults(c, results); sendErr != nil {
+			common.SysLog("send final Gemini stream response failed: " + sendErr.Error())
+		}
 	}
 }
 
@@ -1023,6 +1134,10 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
 		claudeInfo.Usage.TotalTokens = claudeResponse.Usage.InputTokens + claudeResponse.Usage.OutputTokens
 		claudeInfo.Usage.UsageSemantic = "anthropic"
+		claudeInfo.Usage.BillingUsage = dto.CloneBillingUsage(claudeResponse.Usage.BillingUsage)
+		if claudeInfo.Usage.BillingUsage == nil {
+			claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(claudeResponse.Usage)
+		}
 		claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Usage.CacheReadInputTokens
 		claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
 		claudeInfo.Usage.ClaudeCacheCreation5mTokens = claudeResponse.Usage.GetCacheCreation5mTokens()
@@ -1037,8 +1152,39 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
+	case types.RelayFormatOpenAIResponses:
+		convertResult, err := service.ConvertResponse(c, info, types.RelayFormatOpenAIResponses, &claudeResponse)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
+		responsesResponse, ok := convertResult.Value.(*dto.OpenAIResponsesResponse)
+		if !ok {
+			return types.NewError(fmt.Errorf("expected OpenAI Responses response, got %T", convertResult.Value), types.ErrorCodeBadResponseBody)
+		}
+		if responseID := helper.GetResponseID(c); responseID != "" {
+			responsesResponse.ID = responseID
+		}
+		responseData, err = common.Marshal(responsesResponse)
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody)
+		}
 	case types.RelayFormatClaude:
 		responseData = data
+	case types.RelayFormatGemini:
+		{
+			convertResult, convertErr := service.ConvertResponse(c, info, types.RelayFormatGemini, &claudeResponse)
+			if convertErr != nil {
+				return types.NewError(convertErr, types.ErrorCodeBadResponseBody)
+			}
+			geminiResponse, ok := convertResult.Value.(*dto.GeminiChatResponse)
+			if !ok {
+				return types.NewError(fmt.Errorf("expected Gemini generateContent response, got %T", convertResult.Value), types.ErrorCodeBadResponseBody)
+			}
+			responseData, err = common.Marshal(geminiResponse)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeBadResponseBody)
+			}
+		}
 	}
 
 	if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
