@@ -1,0 +1,12 @@
+{
+  "id": "update-upstream-merge",
+  "title": "拉取 upstream 并合并更新本地 fork",
+  "status": "completed",
+  "complexity": "L",
+  "risk": "high",
+  "domain": "devops",
+  "currentPhase": "completed",
+  "nextAction": "已完成 merge、恢复原工作区，待归档",
+  "createdAt": "2026-09-09T00:00:00+08:00",
+  "branch": "main"
+}
