@@ -23,7 +23,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 type ThinkingContentInfo struct {
@@ -96,7 +95,7 @@ type RelayInfo struct {
 	isFirstResponse   bool
 	timingMu          sync.Mutex
 	TimingMarks       map[string]time.Time
-	TimingMeta        map[string]interface{}
+	TimingMeta        map[string]any
 	//SendLastReasoningResponse bool
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
@@ -105,6 +104,7 @@ type RelayInfo struct {
 	RelayMode              int
 	OriginModelName        string
 	PricingModelName       string // 计费使用的模型名；模型降级时为 UpstreamModelName，否则等于 OriginModelName
+	ResponseModel          *ResponseModel
 
 	// BillingModelName is the pricing identity for this request. It is kept
 	// separate from OriginModelName and UpstreamModelName so virtual pricing
@@ -182,6 +182,11 @@ type RelayInfo struct {
 	// and again before settlement. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
+	BillingImageCount     *int
+	// ImageRequestCount is the effective quantity sent on the current attempt;
+	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
+	ImageRequestCount     int
+	ImageQuotaBeforeGroup float64
 
 	Request dto.Request
 
@@ -193,6 +198,10 @@ type RelayInfo struct {
 	FinalRequestRelayFormat types.RelayFormat
 
 	StreamStatus *StreamStatus
+	// PerformanceOutputTokens is captured by settlement and sampled once at
+	// the request boundary, independently of billing success or failure.
+	PerformanceOutputTokens      int64
+	PerformanceBusinessRejection bool
 
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options
@@ -210,7 +219,36 @@ type RelayInfo struct {
 	*TaskRelayInfo
 }
 
+// UpdateImageCount replaces the billable quantity without changing the frozen
+// request parameters or multiplying the legacy and expression prices together.
+func (info *RelayInfo) UpdateImageCount(count int64) {
+	if info == nil || count <= 0 || count > int64(dto.MaxImageN) {
+		return
+	}
+	if info.PriceData.UsePrice {
+		info.PriceData.AddOtherRatio("n", float64(count))
+	}
+	if info.TieredBillingSnapshot != nil && info.TieredBillingSnapshot.EstimatedImageCount != nil {
+		n := int(count)
+		info.BillingImageCount = &n
+	}
+}
+
+func (info *RelayInfo) RequestedImageCount() int {
+	if info.ImageRequestCount > 0 {
+		return info.ImageRequestCount
+	}
+	if info.TieredBillingSnapshot != nil && info.TieredBillingSnapshot.EstimatedImageCount != nil {
+		return *info.TieredBillingSnapshot.EstimatedImageCount
+	}
+	if count, ok := info.PriceData.OtherRatios()["n"]; ok && count >= 1 && count <= dto.MaxImageN {
+		return int(count)
+	}
+	return 1
+}
+
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	info.ResponseModel = nil
 	info.FinalRequestRelayFormat = ""
 	info.RequestConversionChain = nil
 	info.InitRequestConversionChain()
@@ -256,6 +294,15 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	channelOtherSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
 	if ok {
 		channelMeta.ChannelOtherSettings = channelOtherSettings
+	}
+
+	if channelType == constant.ChannelTypeAdvancedCustom &&
+		!channelMeta.ChannelSetting.PassThroughBodyEnabled &&
+		c.Request != nil && c.Request.URL != nil {
+		route, matched := channelMeta.ChannelOtherSettings.AdvancedCustom.MatchPathForModel(c.Request.URL.Path, info.OriginModelName)
+		if matched && route.PassThroughBodyEnabled {
+			channelMeta.ChannelSetting.PassThroughBodyEnabled = true
+		}
 	}
 
 	if streamSupportedChannels[channelMeta.ChannelType] {
@@ -383,6 +430,8 @@ var streamSupportedChannels = map[int]bool{
 	constant.ChannelTypeAdvancedCustom: true,
 	constant.ChannelTypeSub2API:        true,
 	constant.ChannelTypeNewAPI:         true,
+	constant.ChannelTypeVLLM:           true,
+	constant.ChannelTypeSGLang:         true,
 	constant.ChannelTypeTencent:        true,
 }
 
@@ -504,6 +553,9 @@ func reasoningEffortFromRequest(request dto.Request) string {
 		if req != nil && req.GenerationConfig.ThinkingConfig != nil {
 			config := req.GenerationConfig.ThinkingConfig
 			effort = config.ThinkingLevel
+			if canonical, err := kitreasoning.ParseEffort(effort); err == nil {
+				effort = string(canonical)
+			}
 			if effort == "" && config.ThinkingBudget != nil {
 				effort = string(kitreasoning.EffortFromBudget(*config.ThinkingBudget))
 			}
@@ -956,19 +1008,19 @@ func (info *RelayInfo) TimingSinceStartMs() map[string]int64 {
 	return result
 }
 
-func (info *RelayInfo) SetTimingMeta(key string, value interface{}) {
+func (info *RelayInfo) SetTimingMeta(key string, value any) {
 	if info == nil || key == "" {
 		return
 	}
 	info.timingMu.Lock()
 	defer info.timingMu.Unlock()
 	if info.TimingMeta == nil {
-		info.TimingMeta = make(map[string]interface{})
+		info.TimingMeta = make(map[string]any)
 	}
 	info.TimingMeta[key] = value
 }
 
-func (info *RelayInfo) TimingMetaSnapshot() map[string]interface{} {
+func (info *RelayInfo) TimingMetaSnapshot() map[string]any {
 	if info == nil {
 		return nil
 	}
@@ -977,7 +1029,7 @@ func (info *RelayInfo) TimingMetaSnapshot() map[string]interface{} {
 	if len(info.TimingMeta) == 0 {
 		return nil
 	}
-	result := make(map[string]interface{}, len(info.TimingMeta))
+	result := make(map[string]any, len(info.TimingMeta))
 	for key, value := range info.TimingMeta {
 		result[key] = value
 	}
@@ -1125,89 +1177,77 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
 		return jsonData, nil
 	}
-	values := removableDisabledFieldValues(jsonData)
-	result := jsonData
-	deletePath := func(path string) bool {
-		next, err := sjson.DeleteBytes(result, path)
-		if err != nil {
-			common.SysError("RemoveDisabledFields Delete error :" + err.Error())
-			return false
-		}
-		result = next
-		return true
+	if !hasRemovableDisabledField(jsonData, channelOtherSettings) {
+		return jsonData, nil
+	}
+
+	var data map[string]any
+	if err := common.Unmarshal(jsonData, &data); err != nil {
+		common.SysError("RemoveDisabledFields Unmarshal error :" + err.Error())
+		return jsonData, nil
 	}
 
 	// 默认移除 service_tier，除非明确允许（避免额外计费风险）
-	if !channelOtherSettings.AllowServiceTier && values[0].Exists() {
-		if !deletePath("service_tier") {
-			return jsonData, nil
+	if !channelOtherSettings.AllowServiceTier {
+		if _, exists := data["service_tier"]; exists {
+			delete(data, "service_tier")
 		}
 	}
 
 	// 默认移除 inference_geo，除非明确允许（避免在未授权情况下透传数据驻留区域）
-	if !channelOtherSettings.AllowInferenceGeo && values[1].Exists() {
-		if !deletePath("inference_geo") {
-			return jsonData, nil
+	if !channelOtherSettings.AllowInferenceGeo {
+		if _, exists := data["inference_geo"]; exists {
+			delete(data, "inference_geo")
 		}
 	}
 
 	// 默认移除 speed，除非明确允许（避免意外切换 Claude 推理速度模式）
-	if !channelOtherSettings.AllowSpeed && values[2].Exists() {
-		if !deletePath("speed") {
-			return jsonData, nil
+	if !channelOtherSettings.AllowSpeed {
+		if _, exists := data["speed"]; exists {
+			delete(data, "speed")
 		}
 	}
 
 	// 默认允许 store 透传，除非明确禁用（禁用可能影响 Codex 使用）
-	if channelOtherSettings.DisableStore && values[3].Exists() {
-		if !deletePath("store") {
-			return jsonData, nil
+	if channelOtherSettings.DisableStore {
+		if _, exists := data["store"]; exists {
+			delete(data, "store")
 		}
 	}
 
 	// 默认移除 safety_identifier，除非明确允许（保护用户隐私，避免向 OpenAI 报告用户信息）
-	if !channelOtherSettings.AllowSafetyIdentifier && values[4].Exists() {
-		if !deletePath("safety_identifier") {
-			return jsonData, nil
+	if !channelOtherSettings.AllowSafetyIdentifier {
+		if _, exists := data["safety_identifier"]; exists {
+			delete(data, "safety_identifier")
 		}
 	}
 
 	// 默认移除 stream_options.include_obfuscation，除非明确允许（避免关闭响应流混淆保护）
-	if !channelOtherSettings.AllowIncludeObfuscation && values[5].Exists() {
-		if !deletePath("stream_options.include_obfuscation") {
-			return jsonData, nil
-		}
-		streamOptions := gjson.GetBytes(result, "stream_options")
-		if streamOptions.Exists() {
-			hasChild := false
-			streamOptions.ForEach(func(_, _ gjson.Result) bool {
-				hasChild = true
-				return false
-			})
-			if !hasChild {
-				if !deletePath("stream_options") {
-					return jsonData, nil
+	if !channelOtherSettings.AllowIncludeObfuscation {
+		if streamOptionsAny, exists := data["stream_options"]; exists {
+			if streamOptions, ok := streamOptionsAny.(map[string]any); ok {
+				if _, includeExists := streamOptions["include_obfuscation"]; includeExists {
+					delete(streamOptions, "include_obfuscation")
+				}
+				if len(streamOptions) == 0 {
+					delete(data, "stream_options")
+				} else {
+					data["stream_options"] = streamOptions
 				}
 			}
 		}
 	}
 
-	return result, nil
+	jsonDataAfter, err := common.Marshal(data)
+	if err != nil {
+		common.SysError("RemoveDisabledFields Marshal error :" + err.Error())
+		return jsonData, nil
+	}
+	return jsonDataAfter, nil
 }
 
 func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings) bool {
-	values := removableDisabledFieldValues(jsonData)
-
-	return (!channelOtherSettings.AllowServiceTier && values[0].Exists()) ||
-		(!channelOtherSettings.AllowInferenceGeo && values[1].Exists()) ||
-		(!channelOtherSettings.AllowSpeed && values[2].Exists()) ||
-		(channelOtherSettings.DisableStore && values[3].Exists()) ||
-		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
-		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
-}
-
-func removableDisabledFieldValues(jsonData []byte) []gjson.Result {
-	return gjson.GetManyBytes(
+	values := gjson.GetManyBytes(
 		jsonData,
 		"service_tier",
 		"inference_geo",
@@ -1216,6 +1256,13 @@ func removableDisabledFieldValues(jsonData []byte) []gjson.Result {
 		"safety_identifier",
 		"stream_options.include_obfuscation",
 	)
+
+	return (!channelOtherSettings.AllowServiceTier && values[0].Exists()) ||
+		(!channelOtherSettings.AllowInferenceGeo && values[1].Exists()) ||
+		(!channelOtherSettings.AllowSpeed && values[2].Exists()) ||
+		(channelOtherSettings.DisableStore && values[3].Exists()) ||
+		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
+		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
 }
 
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data

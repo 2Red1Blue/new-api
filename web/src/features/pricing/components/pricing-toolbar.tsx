@@ -170,7 +170,7 @@ export function PricingToolbar(props: PricingToolbarProps) {
             <ToggleGroupItem value='CNY'>¥ CNY</ToggleGroupItem>
           </ToggleGroup>
 
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger
               render={
                 <Button

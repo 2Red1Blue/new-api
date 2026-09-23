@@ -688,6 +688,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 	if setting == nil || !setting.Enabled {
 		return 0, false
 	}
+	state := RequestPolicy(c)
 	path := ""
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		path = c.Request.URL.Path
@@ -729,11 +730,13 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		}
 		cacheKeySuffix := buildChannelAffinityCacheKeySuffix(rule, modelName, usingGroup, affinityValue)
 		cacheKeyFull := channelAffinityCacheNamespace + ":" + cacheKeySuffix
+		state.SessionMode, state.SessionModeSource = EffectiveSessionMode(setting, rule)
+		state.RuleName = rule.Name
 		setChannelAffinityContext(c, channelAffinityMeta{
 			CacheKey:         cacheKeyFull,
 			TTLSeconds:       ttlSeconds,
 			RuleName:         rule.Name,
-			SkipRetry:        rule.SkipRetryOnFailure,
+			SkipRetry:        state.SessionMode == "strict",
 			BreakUnavailable: rule.BreakAffinityOnUnavailable,
 			BreakRateLimit:   rule.BreakAffinityOnRateLimit,
 			IncludeModelName: rule.IncludeModelName,
@@ -747,6 +750,10 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			ModelName:        modelName,
 			RequestPath:      path,
 		})
+		state.AddEvent(PolicyEvent{Decision: PolicyDecision{Action: "match", Reason: "session_rule_matched", Source: "session_rule"}})
+		if state.SessionMode == "off" {
+			return 0, false
+		}
 
 		cache := getChannelAffinityCache()
 		binding, found, err := cache.Get(cacheKeySuffix)
@@ -902,15 +909,22 @@ func ShouldIgnoreCachedTokensAfterAffinitySwitch(c *gin.Context) bool {
 	return currentChannelID > 0 && currentChannelID != originalChannelID
 }
 
-func AppendChannelAffinityAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
-	if c == nil || adminInfo == nil {
+func AppendChannelAffinityAdminInfo(c *gin.Context, other *model.LogOther) {
+	if c == nil || other == nil {
 		return
 	}
 	anyInfo, ok := c.Get(ginKeyChannelAffinityLogInfo)
 	if !ok || anyInfo == nil {
 		return
 	}
-	adminInfo["channel_affinity"] = anyInfo
+	// A short session key may be fully represented by key_hint; keep only its
+	// fingerprint in durable logs.
+	if info, ok := anyInfo.(map[string]any); ok {
+		sanitized := cloneStringAnyMap(info)
+		delete(sanitized, "key_hint")
+		anyInfo = sanitized
+	}
+	other.SetAdmin("channel_affinity", anyInfo)
 }
 
 func RecordChannelAffinity(c *gin.Context, channelID int) {
@@ -918,6 +932,9 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 		return
 	}
 	setting := operation_setting.GetChannelAffinitySetting()
+	if RequestPolicy(c).SessionMode == "off" {
+		return
+	}
 	if setting == nil || !setting.Enabled {
 		return
 	}
